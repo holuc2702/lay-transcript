@@ -466,6 +466,15 @@ handle('transcript:saveTxt', async ({ segments, title, url, language, model, def
   return r.filePath;
 });
 
+// --- Cập nhật ứng dụng ---
+handle('app:checkForUpdates', async () => {
+  const events = [];
+  const r = await updater.check({ onEvent: (e) => events.push(e) });
+  return { result: r ? { version: r.updateInfo?.version } : null, events };
+});
+handle('app:quitAndInstall', () => updater.quitAndInstall());
+handle('app:repoUrl', () => updater.REPO);
+
 // --- Lich su ---
 handle('history:list', () => history.list());
 handle('history:remove', (id) => history.remove(id));

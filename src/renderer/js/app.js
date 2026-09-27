@@ -317,11 +317,22 @@ function wireAllEvents() {
     }
   });
   $('#btnInstallUpdate')?.addEventListener('click', () => window.api.app.quitAndInstall());
+  // Nút "Trang Releases": PHẢI có handler click riêng.
+  //
+  // Trước đây đây là thẻ <a href="#"> mà không gắn sự kiện — bấm vào không có
+  // gì xảy ra vì href="#" chỉ thêm dấu # vào URL hiện tại. Đã sửa: bấm là mở
+  // trình duyệt ngoài qua IPC, không phụ thuộc điều hướng của Electron.
   window.api.app
     .repoUrl()
     .then((repo) => {
       const a = $('#btnReleases');
-      if (a) a.href = `https://github.com/${repo}/releases`;
+      if (!a) return;
+      const url = `https://github.com/${repo}/releases`;
+      a.href = url;
+      a.addEventListener('click', (e) => {
+        e.preventDefault();
+        window.api.app.openExternal(url);
+      });
     })
     .catch(() => {});
 
