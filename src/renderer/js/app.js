@@ -90,32 +90,16 @@ function containsCjk(s) {
 // ---------------------------------------------------------------------------
 
 async function init() {
-  // Nền tảng: dùng để chừa chỗ cho ba nút cửa sổ trên macOS (xem app.css)
-  try {
-    const info = await window.api.app.info();
-    document.body.dataset.platform = info.platform;
-  } catch {
-    document.body.dataset.platform = 'unknown';
-  }
+  // NỐI MỌI SỰ KIỆN TRƯỚC, MỌI `await` SAU.
+  //
+  // Đây là bài học đắt giá: trước đây có một `await window.api.app.info()` nằm
+  // ở ĐẦU init(), trước cả việc nối tab. Lần chạy đầu, macOS phải xác minh chữ
+  // ký từng binary (yt-dlp, sidecar...) nên lệnh đó mất 10-30 giây — trong lúc
+  // đó toàn bộ tab và nút đều chết, trông như app bị treo. Người dùng báo đúng.
+  //
+  // Quy tắc: không một `await` nào được đứng trước việc nối sự kiện.
 
-  // Logo: nạp icon thật. Nếu hỏng (chạy dev chưa có file) thì chèn chữ "LT"
-  // dự phòng — không dùng thuộc tính onerror nội tuyến vì CSP chặn.
-  const mark = $('#brandMark');
-  const img = document.createElement('img');
-  img.src = 'icon.svg';
-  img.alt = '';
-  img.addEventListener(
-    'error',
-    () => {
-      const fallback = document.createElement('span');
-      fallback.textContent = 'LT';
-      mark.replaceChildren(fallback);
-    },
-    { once: true }
-  );
-  mark.replaceChildren(img);
-
-  // Tab
+  // Tab — phải bấm được ngay khi cửa sổ hiện ra.
   $$('.tab').forEach((tab) => {
     tab.addEventListener('click', () => {
       $$('.tab').forEach((t) => t.classList.toggle('active', t === tab));
@@ -125,13 +109,36 @@ async function init() {
     });
   });
 
-  // NỐI SỰ KIỆN TRƯỚC, nạp dữ liệu sau.
-  //
-  // Trước đây các nút ở tab Cài đặt được nối SAU `await renderSysInfo()`, mà hàm
-  // đó phải khởi động sidecar Python (10-30 giây lần chạy đầu). Trong khoảng thời
-  // gian đó toàn bộ nút bấm không phản ứng, trông như app bị treo.
   wireSettingsInputs();
   wireAllEvents();
+
+  // Logo: nạp icon thật (không cần await — chỉ là thao tác DOM).
+  const mark = $('#brandMark');
+  if (mark) {
+    const img = document.createElement('img');
+    img.src = 'icon.svg';
+    img.alt = '';
+    img.addEventListener(
+      'error',
+      () => {
+        const fallback = document.createElement('span');
+        fallback.textContent = 'LT';
+        mark.replaceChildren(fallback);
+      },
+      { once: true }
+    );
+    mark.replaceChildren(img);
+  }
+
+  // Từ đây mới được await. Nền tảng cũng lấy bất đồng bộ, không chặn.
+  window.api.app
+    .info()
+    .then((info) => {
+      document.body.dataset.platform = info.platform;
+    })
+    .catch(() => {
+      document.body.dataset.platform = 'unknown';
+    });
 
   await loadCatalogs();
   void refreshSystemInfo();
