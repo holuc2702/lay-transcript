@@ -1,0 +1,112 @@
+appId: vn.laytranscript.app
+productName: Lấy Transcript
+copyright: Lấy Transcript
+
+# Chỉ đóng gói mã nguồn. Mọi thứ lớn (ffmpeg, yt-dlp, sidecar Python) đi kèm
+# qua extraResources bên dưới — chúng là binary thực thi, không được nhét vào asar.
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - src/**/*
+  - package.json
+  - "!src/**/*.map"
+  - "!**/.DS_Store"
+
+# ffmpeg + ffprobe + yt-dlp: phai ngoai asar vi app goi chung bang duong dan that.
+# sidecar: ban PyInstaller da freeze, spawn truc tiep.
+extraResources:
+  - from: resources/bin
+    to: bin
+    filter:
+      - "**/*"
+  - from: resources/sidecar
+    to: sidecar
+    filter:
+      - "**/*"
+
+# asarUntouched: giữ nguyên quyền thực thi của các file đã đóng gói sẵn.
+asar: true
+
+mac:
+  category: public.app-category.productivity
+  # CHỈ arm64 mặc định.
+  #
+  # Lý do KHÔNG gộp 2 kiến trúc vào một bản "universal": sidecar Python được
+  # đóng gói cho đúng một kiến trúc. Bản arm64 chỉ chạy được trên Apple Silicon;
+  # máy Intel thì không chạy được. Nếu đóng gói chung, một trong hai nhóm máy
+  # sẽ nhận app không tạo được transcript.
+  #
+  # Cách làm đúng: build từng bản riêng, mỗi bản kèm sidecar cùng kiến trúc.
+  #   arm64: npm run build:mac
+  #   x64:   npm run sidecar:x64 && npm run build:mac:x64   (xem scripts/build-mac.sh)
+  target:
+    - target: dmg
+      arch:
+        - arm64
+    - target: zip
+      arch:
+        - arm64
+  # macOS 13 là sàn — đây là yêu cầu của CHÍNH Electron 44 (Info.plist gốc
+  # của Electron ghi LSMinimumSystemVersion = 13.0).
+  #
+  # Trước đây đặt 12.0 dựa trên ffmpeg (bản arm64 có minos 12.0) và app chết
+  # ngay khi mở bằng SIGTRAP, không có thông báo nào trong log. Kinh nghiệm:
+  # sàn phiên bản phải là MAX(mọi thành phần bên trong), không phải sàn của
+  # riêng thành phần nào.
+  minimumSystemVersion: '13.0'
+  # Ký ad-hoc (identity "-"), KHÔNG để identity: null.
+  #
+  # Đây là bẫy rất dễ dính: nếu bật hardenedRuntime mà không ký gì cả, app chết
+  # ngay khi khởi động với SIGTRAP — không có thông báo nào, chỉ thấy "Lấy
+  # Transcript quit unexpectedly". Đã xác nhận trên máy thật.
+  #
+  # Ký ad-hoc không cần tài khoản Apple Developer, vẫn tạo ra chữ ký hợp lệ
+  # để hardened runtime chấp nhận, và electron-builder sẽ ký luôn cả sidecar
+  # Python bên trong.
+  #
+  # Khi phát hành cho người khác: đổi thành tên chứng thư thật
+  # (Developer ID Application: ...) để chạy không cảnh báo.
+  identity: "-"
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  extendInfo:
+    NSHumanReadableCopyright: Lấy Transcript
+
+dmg:
+  title: "Lấy Transcript ${version}"
+  contents:
+    - x: 140
+      y: 200
+      type: file
+    - x: 400
+      y: 200
+      type: link
+      path: /Applications
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  # Icon ứng dụng (7 kích thước, x64).
+  icon: build/icon.ico
+  # Chưa ký số. Windows SmartScreen sẽ hiện cảnh báo "Windows đã bảo vệ máy
+  # tính của bạn" — người dùng bấm "Thông tin thêm" -> "Chạy dù sao".
+  signAndEditExecutable: true
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Lấy Transcript
+  artifactName: "Lay-Transcript-${version}-${arch}.${ext}"
+
+linux:
+  target:
+    - AppImage
+  category: Utility

@@ -1,0 +1,41 @@
+# Phep thuoc cua sidecar Python.
+#
+# GHI CHU VE PHIEN BAN — day la phan quan trong nhat cua file nay:
+#
+#   Moi phien ban deu duoc GHIM CHAT (==), khong dung dau ">=".
+#   Ly do: day la app DONG GOI, nguoi dung cai mot lan roi chay tren may
+#   ho. Neu de "bang mo", len moi lan app duoc dung lai ho se nhan phien ban
+#   moi, phien ban moi co the hong (mac dinh cua faster-whisper da tung doi
+#   tu vad_filter=False sang True; so doi onnxruntime 1.25+ bo het ban macOS
+#   Intel; v.v.). App "cai dat xong la chay" thi khong duoc phu thuoc vao
+#   viec may kiem tra phien ban moi.
+#
+#   Neu can nang cap: doi so day, chay lai build, test lai toan bo.
+#
+# onnxruntime: <= 1.23.2 la ban CUOI CUNG con wheel cho macOS Intel (x86_64).
+#   Tu 1.25.0 tro len chi con macOS arm64 + macOS 14 tro len.
+#   -> Ha cap nay giup mac Intel chay duoc app (keo theo len kha nang chay
+#      tren macOS cu hon).
+faster-whisper==1.2.1
+ctranslate2==4.8.2
+huggingface-hub==1.33.0
+tokenizers==0.23.2
+onnxruntime==1.23.2; platform_system == "Darwin" and platform_machine == "x86_64"
+onnxruntime==1.30.0; platform_system == "Darwin" and platform_machine == "arm64"
+onnxruntime==1.30.0; platform_system == "Windows"
+av==18.1.0
+numpy==2.5.3
+tqdm==4.67.1
+
+# --- CHI DANH CHO WINDOWS ---
+# msvc-runtime cung cap cac DLL Visual C++ runtime (msvcp140, vcruntime140,
+# vcruntime140_1). KHONG co chung thi ctranslate2.dll khong load duoc:
+#
+#   FileNotFoundError: Could not find module '...\ctranslate2.dll'
+#   (or one of its dependencies)
+#
+# Da xac nhan tren Windows 11 ARM: may do khong co gi trong System32, va ca
+# ban cai ctranslate2 THAT BAI ke ca khi chay truc tiep (khong phai loi cua
+# PyInstaller). Da so may tieu dung san co san bo VC++ runtime, nhung KHONG
+# duoc xem la co - app phai tu mang theo.
+msvc-runtime==14.44.35112; platform_system == "Windows"

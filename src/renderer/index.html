@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self';"
+    />
+    <title>Lấy Transcript</title>
+    <link rel="stylesheet" href="css/app.css" />
+  </head>
+  <body>
+    <header class="titlebar">
+      <div class="brand">
+        <span class="brand-mark" id="brandMark"></span>
+        <div>
+          <h1>Lấy Transcript</h1>
+          <p class="brand-sub">Tải video YouTube &amp; tạo transcript bằng Whisper</p>
+        </div>
+      </div>
+      <nav class="tabs" role="tablist">
+        <button class="tab active" data-tab="transcribe" role="tab">Tạo transcript</button>
+        <button class="tab" data-tab="history" role="tab">Lịch sử</button>
+        <button class="tab" data-tab="settings" role="tab">Cài đặt</button>
+        <button class="tab" data-tab="help" role="tab">Trợ giúp</button>
+      </nav>
+    </header>
+
+    <main>
+      <!-- ============ TAB: TẠO TRANSCRIPT ============ -->
+      <section class="panel active" data-panel="transcribe">
+        <div class="card input-card">
+          <label class="field-label" for="urlInput">Link YouTube (mỗi dòng một video)</label>
+          <textarea
+            id="urlInput"
+            rows="3"
+            spellcheck="false"
+            placeholder="https://www.youtube.com/watch?v=..."
+          ></textarea>
+          <div class="input-actions">
+            <label class="checkbox">
+              <input type="checkbox" id="autoStart" />
+              <span>Tự động bắt đầu khi dán link</span>
+            </label>
+            <div class="spacer"></div>
+            <button class="btn ghost" id="btnClear">Xóa</button>
+            <button class="btn primary" id="btnStart">Bắt đầu</button>
+          </div>
+          <p class="hint">
+            Dán nhiều link cùng lúc — app sẽ xử lý lần lượt. Video không có phụ đề sẽ
+            được tự động ghi âm bằng Whisper.
+          </p>
+        </div>
+
+        <div id="jobsList" class="jobs-list"></div>
+
+        <div id="emptyState" class="empty-state">
+          <div class="empty-icon">🎬</div>
+          <h2>Chưa có video nào</h2>
+          <p>Dán link YouTube vào ô trên rồi bấm <strong>Bắt đầu</strong>.</p>
+          <p class="empty-sub">
+            Lần chạy đầu tiên sẽ tải model Whisper về máy (khoảng 486&nbsp;MB) — chỉ mất
+            một lần duy nhất.
+          </p>
+        </div>
+      </section>
+
+      <!-- ============ TAB: LỊCH SỬ ============ -->
+      <section class="panel" data-panel="history">
+        <div class="card">
+          <div class="history-head">
+            <div>
+              <h3 style="margin:0 0 2px">Lịch sử</h3>
+              <p class="hint" style="margin:0">
+                <span id="historyCount">0</span> video đã xử lý. Bấm vào một mục để
+                mở lại đường dẫn file, hoặc dán lại link để chạy lại.
+              </p>
+            </div>
+            <div class="row">
+              <button class="btn ghost tiny" id="btnHistoryRefresh">Làm mới</button>
+              <button class="btn ghost tiny" id="btnHistoryClear">Xóa tất cả</button>
+            </div>
+          </div>
+        </div>
+        <div id="historyList" class="history-list"></div>
+        <div id="historyEmpty" class="empty-state" hidden>
+          <div class="empty-icon">🗂</div>
+          <h2>Chưa có lịch sử</h2>
+          <p>Các video bạn xử lý sẽ được lưu lại ở đây và không mất khi đóng app.</p>
+        </div>
+      </section>
+
+      <!-- ============ TAB: CÀI ĐẶT ============ -->
+      <section class="panel" data-panel="settings">
+        <div class="card">
+          <h3>Chất lượng nhận dạng</h3>
+          <div class="field">
+            <label class="field-label" for="modelSelect">Model Whisper</label>
+            <select id="modelSelect"></select>
+            <p class="hint" id="modelHint"></p>
+          </div>
+          <div class="field">
+            <label class="field-label" for="langSelect">Ngôn ngữ</label>
+            <select id="langSelect"></select>
+            <p class="hint">
+              Để <strong>Tự động nhận diện</strong> nếu bạn không chắc — Whisper nhận
+              diện tiếng Trung khá chính xác.
+            </p>
+          </div>
+          <div class="field" id="scriptField">
+            <label class="field-label" for="scriptSelect">Kiểu chữ tiếng Trung</label>
+            <select id="scriptSelect">
+              <option value="">Tự động (không ép)</option>
+              <option value="zh-Hans">Giản thể — 简体</option>
+              <option value="zh-Hant">Phồn thể — 繁體</option>
+            </select>
+            <p class="hint">
+              Whisper thường tự nhảy giữa Giản thể và Phồn thể. Chọn ở đây để ép
+              đúng kiểu chữ bạn muốn.
+            </p>
+          </div>
+          <div class="field">
+            <label class="checkbox">
+              <input type="checkbox" id="translateTitle" />
+              <span>Tự động dịch tiêu đề sang tiếng Việt</span>
+            </label>
+            <p class="hint">
+              Hiện tiêu đề tiếng Trung/Anh kèm bản dịch tiếng Việt ngay bên dưới.
+              Dùng dịch vụ dịch của Google, không cần tài khoản. Nếu không có mạng
+              thì giữ nguyên tiêu đề gốc.
+            </p>
+          </div>
+          <div class="field">
+            <label class="field-label" for="taskSelect">Chế độ</label>
+            <select id="taskSelect">
+              <option value="transcribe">Nguyên văn — giữ đúng thứ được nói</option>
+              <option value="translate">Dịch sang tiếng Anh</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="checkbox">
+              <input type="checkbox" id="vadFilter" />
+              <span>
+                Lọc khoảng im lặng (khuyến nghị bật)
+              </span>
+            </label>
+            <p class="hint">
+              Giúp Whisper khỏi tự bịa thêm lời khi đoạn audio im lặng — đây là
+              nguyên nhân phổ biến nhất của transcript rác.
+            </p>
+          </div>
+          <div class="field">
+            <label class="field-label" for="hotwordsInput">
+              Từ khóa ưu tiên (không bắt buộc)
+            </label>
+            <input
+              type="text"
+              id="hotwordsInput"
+              placeholder="ví dụ: Kubernetes, Transformer, 张量"
+            />
+            <p class="hint">
+              Dùng khi video có thuật ngữ riêng mà Whisper hay ghi sai.
+            </p>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Định dạng xuất</h3>
+          <div class="field">
+            <label class="field-label">Tích vào những định dạng muốn lưu</label>
+            <div id="formatChecks" class="format-checks"></div>
+          </div>
+          <div class="field">
+            <label class="field-label" for="outputDirInput">Thư mục lưu</label>
+            <div class="row">
+              <input type="text" id="outputDirInput" readonly />
+              <button class="btn ghost" id="btnPickDir">Chọn…</button>
+              <button class="btn ghost" id="btnOpenDir">Mở</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>yt-dlp — công cụ tải video</h3>
+          <p class="hint">
+            YouTube liên tục đổi giao thức khiến yt-dlp hỏng. App tự kiểm tra phiên
+            bản mới bằng cách tải thử video thật, và <strong>chỉ dùng bản mới nếu
+            tải được</strong> — nếu hỏng thì giữ nguyên bản đang chạy.
+          </p>
+          <div class="row" id="ytdlpStatus">
+            <span class="pill">Đang kiểm tra…</span>
+          </div>
+          <div class="field">
+            <label class="field-label" for="channelSelect">Kênh cập nhật</label>
+            <select id="channelSelect">
+              <option value="stable">Ổn định — phát hành hằng tháng</option>
+              <option value="nightly">Hằng đêm — cập nhật nhanh nhất (khuyên dùng)</option>
+            </select>
+            <p class="hint">
+              Dự án yt-dlp khuyên dùng kênh <em>hằng đêm</em>: bản phát hành hằng
+              tháng thường bị YouTube chặn trước.
+            </p>
+          </div>
+          <div class="row wrap">
+            <button class="btn" id="btnCheckUpdate">Kiểm tra cập nhật</button>
+            <button class="btn" id="btnUpdateNow">Cập nhật &amp; kiểm chứng</button>
+            <button class="btn" id="btnTestYtdlp">Thử tải thử</button>
+            <button class="btn ghost" id="btnRollback">Quay lui phiên bản</button>
+          </div>
+          <div id="ytdlpLog" class="log-box"></div>
+        </div>
+
+        <div class="card">
+          <h3>Cập nhật ứng dụng</h3>
+          <p class="hint">
+            App tự kiểm tra bản mới trên GitHub. Riêng <strong>yt-dlp</strong> (công cụ
+            tải video) có cơ chế kiểm chứng riêng ở mục trên.
+          </p>
+          <div class="row wrap">
+            <button class="btn" id="btnCheckAppUpdate">Kiểm tra cập nhật app</button>
+            <button class="btn primary" id="btnInstallUpdate" hidden>Khởi động lại để cập nhật</button>
+            <a class="btn ghost" id="btnReleases" href="#" target="_blank">Trang Releases</a>
+          </div>
+          <div id="appUpdateLog" class="log-box"></div>
+        </div>
+
+        <div class="card">
+          <h3>Nâng cao</h3>
+          <div class="field">
+            <label class="checkbox">
+              <input type="checkbox" id="useCookies" />
+              <span>Dùng file cookies (nâng cao)</span>
+            </label>
+            <div class="row">
+              <input type="text" id="cookiesPath" readonly placeholder="Chưa chọn file" />
+              <button class="btn ghost" id="btnPickCookies">Chọn cookies.txt</button>
+            </div>
+            <p class="hint warn">
+              <strong>Cảnh báo:</strong> mặc định app tải video
+              <em>không cần đăng nhập</em> và điều đó đang hoạt động tốt. Bật cookies
+              có thể làm yt-dlp
+              <em>hỏng hơn</em>, và tài khoản Google của bạn có thể bị hạn chế.
+              Chỉ bật khi thật sự cần, và nên dùng một tài khoản phụ.
+            </p>
+          </div>
+          <div class="field">
+            <label class="checkbox">
+              <input type="checkbox" id="keepAudio" />
+              <span>Giữ lại file audio sau khi xong</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Thông tin hệ thống</h3>
+          <div id="sysInfo" class="info-grid"></div>
+        </div>
+      </section>
+
+      <!-- ============ TAB: TRỢ GIÚP ============ -->
+      <section class="panel" data-panel="help">
+        <div class="card">
+          <h3>App này làm gì</h3>
+          <p>
+            Một số video YouTube không có phụ đề. App này sẽ tải phần âm thanh
+            của video về và dùng <strong>Whisper</strong> (chạy hoàn toàn trên máy
+            của bạn, không gửi lên đâu cả) để tạo transcript có timestamp.
+          </p>
+        </div>
+
+        <div class="card">
+          <h3>Câu hỏi thường gặp</h3>
+
+          <details>
+            <summary>Lần đầu chạy mất bao lâu?</summary>
+            <p>
+              Lần đầu app tải model Whisper về máy (mặc định khoảng 486&nbsp;MB) và
+              tự trích xuất ffmpeg. Sau đó không cần tải lại nữa. Xem thanh tiến
+              trình ngay dưới ô nhập link.
+            </p>
+          </details>
+
+          <details>
+            <summary>Video 1 tiếng mất bao lâu để xong?</summary>
+            <p>
+              Với model <strong>small</strong> trên máy Mac M-series, khoảng
+              <strong>9 phút</strong>. Nếu muốn nhanh hơn, chọn model
+              <strong>base</strong> (khoảng 3 phút, chất lượng thấp hơn). Nếu muốn
+              chính xác hơn, chọn <strong>large-v3-turbo</strong> (khoảng 15 phút,
+              tốt nhất với tiếng Trung).
+            </p>
+            <p>
+              Thời gian thực tế phụ thuộc vào CPU của bạn — xem mục
+              <strong>Thông tin hệ thống</strong> trong Cài đặt.
+            </p>
+          </details>
+
+          <details>
+            <summary>Báo lỗi "YouTube đang chặn IP này" thì làm sao?</summary>
+            <p>
+              Đây là YouTube chặn IP, <strong>không phải lỗi của app</strong> và
+              cũng không phải lỗi của yt-dlp. Cách xử lý: đổi mạng (dùng 4G thay
+              WiFi), hoặc chờ 10–15 phút rồi thử lại. Nếu bạn tải nhiều video liên
+              tục, hãy nghỉ giữa các lần tải.
+            </p>
+          </details>
+
+          <details>
+            <summary>Transcript ra rác, lặp lại câu, hoặc sai chữ tiếng Trung?</summary>
+            <p>
+              <strong>1. Bật “Lọc khoảng im lặng”</strong> trong Cài đặt — đây là
+              nguyên nhân phổ biến nhất.
+            </p>
+            <p>
+              <strong>2. Chọn đúng kiểu chữ</strong> trong Cài đặt. Whisper thường
+              tự nhảy giữa Giản thể và Phồn thể giữa chừng.
+            </p>
+            <p>
+              <strong>3. Nâng cấp model</strong> lên <code>large-v3-turbo</code>
+              nếu bạn xử lý nhiều tiếng Trung.
+            </p>
+            <p>
+              <strong>4. Thêm từ khóa</strong> vào ô “Từ khóa ưu tiên” nếu video có
+              thuật ngữ riêng.
+            </p>
+          </details>
+
+          <details>
+            <summary>Có cách nào nhanh hơn không?</summary>
+            <p>
+              Nếu video đã <em>có</em> phụ đề, hãy mở phụ đề trên YouTube rồi sao
+              chép — nhanh và chính xác hơn nhiều. App này sinh ra là để dùng khi
+              video <strong>không có</strong> phụ đề.
+            </p>
+          </details>
+
+          <details>
+            <summary>Dữ liệu của tôi có được gửi đi đâu không?</summary>
+            <p>
+              Không. Whisper chạy hoàn toàn trên máy bạn. App chỉ liên hệ với
+              YouTube (để tải audio) và Hugging Face (để tải model, chỉ một lần).
+              Không tài khoản, không telemetry.
+            </p>
+          </details>
+
+          <details>
+            <summary>Ứng dụng báo lỗi, làm sao gửi thông tin cho bạn?</summary>
+            <p>
+              Mở thư mục nhật ký bằng nút <strong>“Mở nhật ký (log)”</strong> trong
+              menu <strong>Xem</strong> rồi gửi file <code>app.log</code>.
+            </p>
+          </details>
+        </div>
+
+        <div class="card">
+          <h3>Liên hệ</h3>
+          <p>
+            Góp ý, báo lỗi, hoặc muốn thêm tính năng:
+            <a href="#" id="mailLink">holuc1991@gmail.com</a>
+          </p>
+          <p class="hint">
+            Báo lỗi kèm file nhật ký sẽ giúp sửa nhanh hơn. Mở nhật ký bằng menu
+            <strong>Xem → Mở nhật ký (log)</strong>.
+          </p>
+        </div>
+
+        <div class="card">
+          <h3>Thành phần bên trong</h3>
+          <div id="sysInfo2" class="info-grid"></div>
+        </div>
+      </section>
+    </main>
+
+    <div id="toast" class="toast" hidden></div>
+
+    <script src="js/app.js"></script>
+  </body>
+</html>

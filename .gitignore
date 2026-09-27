@@ -1,0 +1,15 @@
+node_modules/
+release/
+.sidecar-build/
+.sidecar-build/
+dist/
+build/sidecar/
+resources/bin/
+resources/sidecar/
+test/tmp/
+test/fixtures/
+.DS_Store
+*.log
+test/tmp/
+*.blockmap
+builder-debug.yml

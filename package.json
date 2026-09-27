@@ -1,0 +1,47 @@
+{
+  "name": "lay-transcript",
+  "productName": "Lấy Transcript",
+  "version": "1.0.0",
+  "description": "Lấy transcript chuẩn từ YouTube bằng Whisper — tự động tải, tự động nhận dạng giọng nói, không cần chạy lệnh.",
+  "author": {
+    "name": "holuc2702",
+    "email": "holuc1991@gmail.com"
+  },
+  "license": "MIT",
+  "main": "src/main/index.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test 'test/**/*.test.js'",
+    "test:sidecar": "node --test test/sidecar.test.js",
+    "fetch-deps": "bash scripts/fetch-deps.sh",
+    "build:sidecar": "bash scripts/build-sidecar.sh",
+    "build:mac": "bash scripts/build-mac.sh",
+    "e2e": "node scripts/e2e-ui.mjs",
+    "e2e:autostart": "node scripts/e2e-autostart.mjs"
+  },
+  "devDependencies": {
+    "@electron/packager": "^20.3.0",
+    "electron": "^44.4.5",
+    "electron-builder": "^26.15.3",
+    "ws": "^8.22.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/holuc2702/lay-transcript.git"
+  },
+  "homepage": "https://github.com/holuc2702/lay-transcript",
+  "build": {
+    "appId": "vn.laytranscript.app",
+    "productName": "Lấy Transcript",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "holuc2702",
+        "repo": "lay-transcript"
+      }
+    ]
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
+  }
+}

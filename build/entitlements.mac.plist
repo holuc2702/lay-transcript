@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <!--
+      Electron 44 chay tren may hoa (V8, JIT). macOS se kill mot tien trinh
+      co signed binary neu no sinh code truc tiep ma khong duoc phep.
+      Ba quyen sau day bat buoc cho phep dieu do.
+    -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+
+    <!--
+      Sidecar Python la binary rieng, KHONG duoc ky cung team id voi app.
+    Khong co quyen nay, macOS se tu choi chay no.
+    -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+
+    <!-- App can moc tep ra thu muc Videos va thu muc nguoi dung. -->
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
+    <key>com.apple.security.files.downloads.read-write</key>
+    <true/>
+  </dict>
+</plist>
