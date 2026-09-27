@@ -39,13 +39,31 @@ foreach ($item in $copy) {
   $from = Join-Path $src $item
   if (-not (Test-Path $from)) { continue }
   $to = Join-Path $work $item
-  if (Test-Path $to) { Remove-Item -Recurse -Force $to }
-  Copy-Item -Recurse -Force $from $to
+  if ($item -eq 'resources') {
+    # Riêng thư mục resources: CHỈ chép đè file mã nguồn, GIỮ LẠI các file
+    # .exe đã có (ffmpeg/yt-dlp/sidecar build mất hàng chục phút, xóa đi là
+    # phải tải/build lại từ đầu). Chỉ xóa file của macOS.
+    New-Item -ItemType Directory -Force -Path $to | Out-Null
+    foreach ($junk in @('bin\yt-dlp_macos', 'bin\ffmpeg', 'bin\ffprobe')) {
+      $j = Join-Path $to $junk
+      if (Test-Path $j) { Remove-Item -Force $j }
+    }
+    # Không chép đè thư mục sidecar đã build xong
+    Get-ChildItem $from -Exclude 'bin', 'sidecar' | ForEach-Object {
+      Copy-Item -Recurse -Force $_.FullName (Join-Path $to $_.Name)
+    }
+    if (-not (Test-Path (Join-Path $to 'bin'))) {
+      Copy-Item -Recurse -Force (Join-Path $from 'bin') (Join-Path $to 'bin')
+    }
+  } else {
+    if (Test-Path $to) { Remove-Item -Recurse -Force $to }
+    Copy-Item -Recurse -Force $from $to
+  }
 }
 # Khong chep ban build cua macOS (khong dung duoc tren Windows)
-foreach ($junk in @('resources\bin\yt-dlp_macos', 'resources\bin\ffmpeg', 'resources\bin\ffprobe', 'resources\sidecar')) {
+foreach ($junk in @('resources\bin\yt-dlp_macos', 'resources\bin\ffmpeg', 'resources\bin\ffprobe')) {
   $j = Join-Path $work $junk
-  if (Test-Path $j) { Remove-Item -Recurse -Force $j }
+  if (Test-Path $j) { Remove-Item -Force $j }
 }
 Ok "ma nguon da chep"
 
