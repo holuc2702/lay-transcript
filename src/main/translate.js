@@ -136,4 +136,87 @@ async function toVietnamese(text) {
   return { text: null, reason: lastErr ? lastErr.message : 'dịch thất bại' };
 }
 
-module.exports = { toVietnamese, loadCache, looksVietnamese };
+/**
+ * Dịch TOÀN BỘ transcript sang tiếng Việt (bản dịch TẠM bằng máy).
+ *
+ * Mục đích: giúp người dùng HIỂU ĐẠI KHÁI nội dung, không phải để xuất bản.
+ * Trả về văn bản thuần (không timestamp), người dùng phải hiểu rõ đây chỉ là
+ * bản dịch máy và có thể sai — giao diện sẽ gắn nhãn rõ ràng.
+ *
+ * Chia nhỏ theo ký tự (~2800/request) để không vượt giới hạn URL, dịch từng
+ * khúc rồi nối lại. Có cache theo hash nội dung để không dịch lại.
+ */
+const SCRIPT_CACHE_LIMIT = 100;
+const scriptCache = new Map();
+
+function hashText(s) {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) {
+    h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
+  }
+  return String(h >>> 0);
+}
+
+function splitIntoChunks(segments, maxChars = 2800) {
+  const chunks = [];
+  let cur = [];
+  let len = 0;
+  for (const s of segments) {
+    const t = String(s.text || '').trim();
+    if (!t) continue;
+    if (len + t.length + 1 > maxChars && cur.length) {
+      chunks.push(cur);
+      cur = [];
+      len = 0;
+    }
+    cur.push(t);
+    len += t.length + 1;
+  }
+  if (cur.length) chunks.push(cur);
+  return chunks;
+}
+
+async function scriptToVietnamese(segments, onProgress) {
+  const texts = (Array.isArray(segments) ? segments : [])
+    .map((s) => String(s?.text || '').trim())
+    .filter(Boolean);
+  if (!texts.length) return { text: null, reason: 'Không có nội dung để dịch' };
+
+  const joined = texts.join('\n');
+  if (looksVietnamese(joined.slice(0, 2000))) {
+    return { text: joined, reason: 'đã là tiếng Việt', alreadyVietnamese: true };
+  }
+
+  const key = 'script:' + hashText(joined);
+  if (scriptCache.has(key)) return { text: scriptCache.get(key), cached: true };
+
+  const chunks = splitIntoChunks(segments);
+  const out = [];
+  let failed = 0;
+  for (let i = 0; i < chunks.length; i++) {
+    const piece = chunks[i].join('\n');
+    try {
+      const t = await viaGoogle(piece);
+      out.push(t);
+    } catch (err) {
+      // Thử MyMemory cho khúc này, hỏng thì giữ nguyên tiếng gốc và đánh dấu.
+      try {
+        out.push(await viaMyMemory(piece));
+      } catch {
+        failed++;
+        out.push(piece);
+      }
+    }
+    if (onProgress) {
+      try { onProgress({ done: i + 1, total: chunks.length }); } catch { /* kệ */ }
+    }
+  }
+  const text = out.join('\n\n');
+  if (out.length) {
+    scriptCache.set(key, text);
+    if (scriptCache.size > SCRIPT_CACHE_LIMIT) scriptCache.delete(scriptCache.keys().next().value);
+  }
+  return { text, failed, chunkCount: chunks.length };
+}
+
+module.exports = { toVietnamese, loadCache, looksVietnamese, scriptToVietnamese };

@@ -544,7 +544,8 @@ function renderJob(id) {
       ${
         j.state === 'done'
           ? `<button class="btn tiny" data-act="copy">Sao chép văn bản</button>
-             <button class="btn tiny" data-act="savetxt">Lưu thành .txt</button>`
+             <button class="btn tiny" data-act="savetxt">Lưu thành .txt</button>
+             <button class="btn tiny" data-act="translate">Dịch sang tiếng Việt</button>`
           : ''
       }
       ${
@@ -588,6 +589,8 @@ function renderJob(id) {
         await copyPlainText(id);
       } else if (act === 'savetxt') {
         await saveAsTxt(id);
+      } else if (act === 'translate') {
+        await translateScript(id, el);
       }
     });
   });
@@ -703,6 +706,75 @@ async function saveAsTxt(id) {
     defaultName: `${stem}.txt`,
   });
   if (saved) toast(`Đã lưu: ${saved.split(/[\\/]/).pop()}`, 'ok');
+}
+
+/**
+ * Dịch toàn bộ transcript sang tiếng Việt — BẢN DỊCH TẠM bằng máy.
+ * Hiển thị trong một khung riêng, gắn nhãn rõ ràng để người dùng biết đây
+ * không phải bản dịch chuẩn.
+ */
+async function translateScript(id, el) {
+  const j = state.jobs.get(id);
+  const segments = j?.segments || (await window.api.jobs.segments(id)) || [];
+  if (!segments.length) {
+    toast('Chưa có transcript để dịch.', 'error');
+    return;
+  }
+
+  // Mở khung chờ trước để người dùng thấy đang làm việc.
+  let box = el.querySelector('[data-tsbox]');
+  if (!box) {
+    box = document.createElement('div');
+    box.className = 'ts-box';
+    box.dataset.tsbox = '1';
+    el.appendChild(box);
+  }
+  box.innerHTML = `<div class="ts-head">
+      <span class="ts-badge">Bản dịch tạm bằng máy — chỉ để hiểu đại khái</span>
+      <button class="btn tiny ghost" data-tsclose>Đóng</button>
+    </div>
+    <div class="ts-body"><span class="spinner"></span> Đang dịch…</div>`;
+  box.querySelector('[data-tsclose]').addEventListener('click', () => box.remove());
+
+  const off = window.api.translate.onProgress((p) => {
+    const b = box.querySelector('.ts-body');
+    if (b) b.innerHTML = `<span class="spinner"></span> Đang dịch… ${p.done}/${p.total}`;
+  });
+
+  try {
+    const r = await window.api.translate.script(segments);
+    const text = String(r?.text || '').trim();
+    if (!text) {
+      box.querySelector('.ts-body').textContent =
+        'Không dịch được: ' + (r?.reason || 'lỗi không rõ');
+      return;
+    }
+    const esc = escapeHtml(text).replace(/\n/g, '<br>');
+    const note = r.alreadyVietnamese
+      ? '<div class="ts-note">Transcript vốn đã là tiếng Việt.</div>'
+      : r.failed
+        ? `<div class="ts-note">Có ${r.failed} đoạn dịch lỗi nên giữ nguyên tiếng gốc.</div>`
+        : '';
+    const body = box.querySelector('.ts-body');
+    body.innerHTML =
+      `<div class="ts-text">${esc}</div>${note}
+       <div class="ts-actions">
+         <button class="btn tiny" data-tscopy>Sao chép bản dịch</button>
+       </div>`;
+    body.querySelector('[data-tscopy]').addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(text);
+        toast('Đã sao chép bản dịch.', 'ok');
+      } catch {
+        toast('Không sao chép được.', 'error');
+      }
+    });
+  } catch (err) {
+    const b = box.querySelector('.ts-body');
+    if (b) b.textContent = 'Không dịch được: ' + err.message;
+  } finally {
+    off();
+  }
 }
 
 // ---------------------------------------------------------------------------

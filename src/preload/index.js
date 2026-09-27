@@ -70,6 +70,8 @@ contextBridge.exposeInMainWorld('api', {
   },
   translate: {
     toVi: (text) => call('translate:toVi', text),
+    script: (segments) => call('translate:script', segments),
+    onProgress: (cb) => subscribe('translate:progress', cb),
   },
   catalog: {
     models: () => call('catalog:models'),

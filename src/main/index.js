@@ -512,6 +512,19 @@ handle('history:segments', async (id) => {
 /** Dịch một chuỗi bất kỳ sang tiếng Việt (dùng để dịch lại tiêu đề cũ). */
 handle('translate:toVi', (text) => translate.toVietnamese(text));
 
+/**
+ * Dịch TOÀN BỘ transcript sang tiếng Việt — BẢN DỊCH TẠM bằng máy.
+ * Không hứa độ chính xác; giao diện phải gắn nhãn "dịch tạm" khi hiển thị.
+ */
+handle('translate:script', async (segments) => {
+  const parts = [];
+  const r = await translate.scriptToVietnamese(segments, (p) => {
+    parts.push(p);
+    broadcast('translate:progress', p);
+  });
+  return r;
+});
+
 // --- Danh muc tinh ---
 handle('catalog:models', () => C.MODELS);
 handle('catalog:languages', () => C.LANGUAGES);

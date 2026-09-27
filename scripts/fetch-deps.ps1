@@ -35,26 +35,36 @@ $fp = Join-Path $bin 'ffprobe.exe'
 if ((Test-Path $ff) -and (Test-Path $fp)) {
   Say "ffmpeg da co san — bo qua"
 } else {
-  Say "Tai ffmpeg/ffprobe cho Windows x64 (gyan.dev)"
+  # Ưu tiên file đã tải sẵn trên máy Mac (qua thư mục chia sẻ): nhanh hơn hẳn
+  # và không phụ thuộc mạng của máy ảo.
+  $cached = '\\Mac\\Home\\Documents\\Default Project\\lay-transcript\\test\\tmp\\ff-win.zip'
+  $useCached = Test-Path $cached
+  if ($useCached) { Say "Dung file ffmpeg da tai san tren may Mac" }
+  else { Say "Tai ffmpeg/ffprobe cho Windows x64 (gyan.dev)" }
   # Tên file tạm phải DUY NHẤT theo lần chạy. Dùng tên cố định thì lần chạy
   # bị hủy giữa chừng để lại file đang bị Windows Defender hoặc một tiến trình
   # khác giữ khóa, và lần sau ghi đè sẽ báo "cannot access the file because it is
   # being used by another process".
   $tag = [guid]::NewGuid().ToString('N').Substring(0, 8)
-  $zip = Join-Path $env:TEMP "ffmpeg-$tag.zip"
-  $url = 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip'
-  $got = $false
-  for ($i = 1; $i -le 3 -and -not $got; $i++) {
-    try {
-      Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
-      $got = $true
-    } catch {
-      Write-Host "   tai that bai (lan $i/3): $($_.Exception.Message)" -ForegroundColor Yellow
-      Remove-Item $zip -ErrorAction SilentlyContinue
-      Start-Sleep -Seconds 5
+  if ($useCached) {
+    $zip = $cached
+    $got = $true
+  } else {
+    $zip = Join-Path $env:TEMP "ffmpeg-$tag.zip"
+    $url = 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip'
+    $got = $false
+    for ($i = 1; $i -le 3 -and -not $got; $i++) {
+      try {
+        Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
+        $got = $true
+      } catch {
+        Write-Host "   tai that bai (lan $i/3): $($_.Exception.Message)" -ForegroundColor Yellow
+        Remove-Item $zip -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 5
+      }
     }
+    if (-not $got) { Die 'khong tai duoc ffmpeg.zip' }
   }
-  if (-not $got) { Die 'khong tai duoc ffmpeg.zip' }
   $ex = Join-Path $env:TEMP "ffmpeg-x-$tag"
   if (Test-Path $ex) { Remove-Item -Recurse -Force $ex }
   Expand-Archive -Path $zip -DestinationPath $ex -Force
