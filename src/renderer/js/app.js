@@ -854,6 +854,17 @@ function renderHistory() {
   if (empty) empty.hidden = true;
   if (!box) return;
 
+  // Giữ lại trạng thái đang mở của từng mục: loadHistory vẽ lại toàn bộ danh
+  // sách, nên phải nhớ mục nào đang mở và nội dung đã tải để không mất.
+  const savedOpen = new Map();
+  box.querySelectorAll('.hist-item[data-id]').forEach((el) => {
+    const id = el.dataset.id;
+    const inner = el.querySelector('[data-hseg]');
+    if (inner && inner.childElementCount && !inner.hidden) {
+      savedOpen.set(id, inner.innerHTML);
+    }
+  });
+
   box.innerHTML = state.history
     .map((h) => {
       const when = h.createdAt ? new Date(h.createdAt).toLocaleString('vi-VN') : '';
@@ -862,33 +873,59 @@ function renderHistory() {
           ? `<div class="hist-title-vi">${escapeHtml(h.titleVi)}</div>`
           : '';
       const gone = h.filesMissing ? '<span class="hist-warn">file đã bị xoá</span>' : '';
-      return `<div class="hist-item" data-id="${escapeAttr(h.id || '')}">
-        <div class="hist-main">
-          <div class="hist-title">${escapeHtml(h.title || 'Video')}</div>
-          ${titleVi}
-          <div class="hist-meta">
-            ${h.uploader ? escapeHtml(h.uploader) + ' · ' : ''}${when}
-            ${h.segmentCount ? ` · ${h.segmentCount} đoạn` : ''}
-            ${h.model ? ` · ${escapeHtml(h.model)}` : ''}
-            ${h.language ? ` · ${escapeHtml(h.language)}` : ''}
-            ${gone}
+      const id = escapeAttr(h.id || '');
+      return `<div class="hist-item" data-id="${id}">
+        <div class="hist-top">
+          <div class="hist-main">
+            <div class="hist-title">${escapeHtml(h.title || 'Video')}</div>
+            ${titleVi}
+            <div class="hist-meta">
+              ${h.uploader ? escapeHtml(h.uploader) + ' · ' : ''}${when}
+              ${h.segmentCount ? ` · ${h.segmentCount} đoạn` : ''}
+              ${h.model ? ` · ${escapeHtml(h.model)}` : ''}
+              ${h.language ? ` · ${escapeHtml(h.language)}` : ''}
+              ${gone}
+            </div>
+          </div>
+          <div class="hist-actions">
+            ${h.segmentCount
+              ? `<button class="btn tiny" data-hact="view">Xem</button>`
+              : ''}
+            ${h.segmentCount
+              ? `<button class="btn tiny" data-hact="copy">Sao chép văn bản</button>`
+              : ''}
+            <button class="btn tiny" data-hact="rerun" data-url="${escapeAttr(h.url)}">Chạy lại</button>
+            <button class="btn tiny" data-hact="open" data-file="${escapeAttr((h.outputs || [])[0] || '')}"
+              ${h.outputs && h.outputs.length ? '' : 'disabled'}>Mở file</button>
+            <button class="btn tiny ghost" data-hact="remove" title="Xóa mục này">✕</button>
           </div>
         </div>
-        <div class="hist-actions">
-          <button class="btn tiny" data-hact="rerun" data-url="${escapeAttr(h.url)}">Chạy lại</button>
-          <button class="btn tiny" data-hact="open" data-file="${escapeAttr((h.outputs || [])[0] || '')}"
-            ${h.outputs && h.outputs.length ? '' : 'disabled'}>Mở file</button>
-          <button class="btn tiny ghost" data-hact="remove" title="Xóa mục này">✕</button>
-        </div>
+        <div class="transcript hist-seg" data-hseg hidden></div>
       </div>`;
     })
     .join('');
 
+  // Khôi phục nội dung đang mở trước khi vẽ lại.
+  box.querySelectorAll('.hist-item[data-id]').forEach((el) => {
+    const html = savedOpen.get(el.dataset.id);
+    if (html) {
+      const inner = el.querySelector('[data-hseg]');
+      if (inner) {
+        inner.innerHTML = html;
+        inner.hidden = false;
+        const btn = el.querySelector('[data-hact="view"]');
+        if (btn) btn.textContent = 'Thu gọn';
+      }
+    }
+  });
+
   box.querySelectorAll('[data-hact]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const act = btn.dataset.hact;
+      const item = btn.closest('.hist-item');
+      const id = item.dataset.id;
       if (act === 'remove') {
-        await window.api.history.remove(btn.closest('.hist-item').dataset.id);
+        await window.api.history.remove(id);
         await loadHistory();
         toast('Đã xóa khỏi lịch sử.', 'ok');
       } else if (act === 'open') {
@@ -907,9 +944,129 @@ function renderHistory() {
           p.classList.toggle('active', p.dataset.panel === 'transcribe')
         );
         startJobs();
+      } else if (act === 'view') {
+        toggleHistoryView(item, id, btn);
+      } else if (act === 'copy') {
+        await copyHistoryText(id);
+      } else if (act === 'savetxt') {
+        await saveHistoryTxt(id);
       }
     });
   });
+}
+
+/** Mở/đóng transcript của một mục lịch sử — đọc từ file .json trên đĩa. */
+async function toggleHistoryView(item, id, btn) {
+  const inner = item.querySelector('[data-hseg]');
+  if (!inner) return;
+  if (inner.childElementCount && !inner.hidden) {
+    inner.hidden = true;
+    if (btn) btn.textContent = 'Xem';
+    return;
+  }
+  if (inner.childElementCount) {
+    inner.hidden = false;
+    if (btn) btn.textContent = 'Thu gọn';
+    return;
+  }
+  if (btn) btn.disabled = true;
+  try {
+    const segments = await window.api.history.segments(id);
+    if (!segments || !segments.length) {
+      toast('Không còn dữ liệu transcript của mục này.', 'error');
+      return;
+    }
+    const h = state.history.find((x) => x.id === id);
+    inner.innerHTML =
+      segments
+        .map((s) => {
+          const t = fmtDuration(s.start);
+          const cn = containsCjk(s.text) ? ' cn' : '';
+          return `<div class="seg${cn}"><span class="seg-time">${t}</span><span class="seg-text">${escapeHtml(
+            String(s.text || '').trim()
+          )}</span></div>`;
+        })
+        .join('') +
+      `<div class="hist-seg-actions">
+        <button class="btn tiny" data-hact="copy">Sao chép văn bản</button>
+        <button class="btn tiny" data-hact="savetxt">Lưu thành .txt</button>
+      </div>`;
+    inner.hidden = false;
+    if (btn) btn.textContent = 'Thu gọn';
+    // Gắn sự kiện cho hai nút vừa sinh ra
+    inner.querySelectorAll('[data-hact]').forEach((b) => {
+      b.addEventListener('click', () => {
+        if (b.dataset.hact === 'copy') copyHistoryText(id, segments);
+        else if (b.dataset.hact === 'savetxt') saveHistoryTxt(id, segments);
+      });
+    });
+    if (h) h._segments = segments;
+  } catch (err) {
+    toast(err.message, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+/** Sao chép toàn bộ văn bản của một mục lịch sử (không kèm số phút). */
+async function copyHistoryText(id, segments) {
+  const h = state.history.find((x) => x.id === id);
+  let segs = segments || h?._segments;
+  if (!segs) {
+    try {
+      segs = await window.api.history.segments(id);
+    } catch (err) {
+      toast(err.message, 'error');
+      return;
+    }
+  }
+  if (!segs || !segs.length) {
+    toast('Không còn dữ liệu transcript của mục này.', 'error');
+    return;
+  }
+  const text = plainTextOf(segs);
+  try {
+    await navigator.clipboard.writeText(text);
+    toast(`Đã sao chép ${text.length.toLocaleString('vi-VN')} ký tự.`, 'ok');
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    toast(ok ? 'Đã sao chép văn bản.' : 'Không sao chép được.', ok ? 'ok' : 'error');
+  }
+}
+
+/** Lưu một mục lịch sử thành .txt, tên file do người dùng tự đặt. */
+async function saveHistoryTxt(id, segments) {
+  const h = state.history.find((x) => x.id === id);
+  let segs = segments || h?._segments;
+  if (!segs) {
+    try {
+      segs = await window.api.history.segments(id);
+    } catch (err) {
+      toast(err.message, 'error');
+      return;
+    }
+  }
+  if (!segs || !segs.length) {
+    toast('Không còn dữ liệu transcript của mục này.', 'error');
+    return;
+  }
+  const stem = h?.title || `transcript-${String(id).slice(0, 8)}`;
+  const saved = await window.api.transcript.saveTxt({
+    segments: segs,
+    title: h?.title,
+    url: h?.url,
+    language: h?.language,
+    model: h?.model,
+    defaultName: `${stem}.txt`,
+  });
+  if (saved) toast(`Đã lưu: ${saved.split(/[\\/]/).pop()}`, 'ok');
 }
 
 // ---------------------------------------------------------------------------

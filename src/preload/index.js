@@ -66,6 +66,7 @@ contextBridge.exposeInMainWorld('api', {
     clear: () => call('history:clear'),
     prune: () => call('history:prune'),
     onChanged: (cb) => subscribe('history:changed', cb),
+    segments: (id) => call('history:segments', id),
   },
   translate: {
     toVi: (text) => call('translate:toVi', text),

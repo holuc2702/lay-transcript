@@ -888,3 +888,36 @@ details p {
 #mailLink:hover {
   color: var(--accent-hover);
 }
+
+/* ---------------- Mục lịch sử mở rộng ---------------- */
+
+.hist-item {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.hist-top {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.hist-seg {
+  margin-top: 12px;
+  border-top: 1px solid var(--border);
+  border-left: 0;
+  border-right: 0;
+  border-bottom: 0;
+  background: var(--bg);
+  max-height: 380px;
+}
+
+.hist-seg-actions {
+  display: flex;
+  gap: 8px;
+  padding: 10px 16px 12px;
+  background: var(--bg-elev-2);
+  border-top: 1px solid var(--border);
+  position: sticky;
+  bottom: 0;
+}

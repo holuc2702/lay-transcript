@@ -472,6 +472,43 @@ handle('history:remove', (id) => history.remove(id));
 handle('history:clear', () => history.clear());
 handle('history:prune', () => history.pruneMissingFiles());
 
+/**
+ * Đọc lại các đoạn transcript của một mục lịch sử.
+ *
+ * File .json do app xuất ra chứa đủ: start/end/text/words từng đoạn. Đọc lại
+ * từ đĩa thay vì giữ trong RAM — vì transcript có thể vài MB và lịch sử giữ
+ * tối đa 200 mục.
+ */
+handle('history:segments', async (id) => {
+  const entry = history.list().find((e) => e.id === id);
+  if (!entry) throw new Error('Không tìm thấy mục này trong lịch sử nữa.');
+  const files = entry.outputs || [];
+  const found = files.find((f) => f.toLowerCase().endsWith('.json') && fs.existsSync(f));
+  if (!found) {
+    throw new Error(
+      'Không còn file .json của video này trên đĩa.\n' +
+        'App chỉ giữ file kết quả, không giữ transcript trong bộ nhớ — ' +
+        'nếu bạn xoá file tay hoặc chuyển ra chỗ khác thì không còn để hiển thị.'
+    );
+  }
+  try {
+    const data = JSON.parse(fs.readFileSync(found, 'utf8'));
+    const segs = Array.isArray(data.segments) ? data.segments : data;
+    if (!segs.length) throw new Error('File rỗng.');
+    return segs.map((s, i) => ({
+      index: i,
+      start: Number(s.start) || 0,
+      end: Number(s.end) || 0,
+      text: String(s.text || ''),
+      words: Array.isArray(s.words)
+        ? s.words.map((w) => ({ start: Number(w.start) || 0, end: Number(w.end) || 0, word: String(w.word || '') }))
+        : [],
+    }));
+  } catch (e) {
+    throw new Error(`Không đọc được file ${found}: ${e.message}`);
+  }
+});
+
 /** Dịch một chuỗi bất kỳ sang tiếng Việt (dùng để dịch lại tiêu đề cũ). */
 handle('translate:toVi', (text) => translate.toVietnamese(text));
 
