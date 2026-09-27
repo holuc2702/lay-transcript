@@ -93,9 +93,14 @@ win:
         - x64
   # Icon ứng dụng (7 kích thước, x64).
   icon: build/icon.ico
-  # Chưa ký số. Windows SmartScreen sẽ hiện cảnh báo "Windows đã bảo vệ máy
-  # tính của bạn" — người dùng bấm "Thông tin thêm" -> "Chạy dù sao".
-  signAndEditExecutable: true
+  # Chưa ký số Authenticode. Windows SmartScreen sẽ hiện cảnh báo "Windows đã
+  # bảo vệ máy tính của bạn" — người dùng bấm "Thông tin thêm" -> "Chạy dù sao".
+  #
+  # Để false (không gọi signtool): trên máy build, Windows Defender giữ khóa file
+  # .exe ngay khi signtool chạm vào, khiến electron-builder thất bại cả 3 lần thử
+  # ("output file is locked for writing"). Đã xác nhận trên Windows 11.
+  # Khi nào có chứng thư ký số thì bật lại thành true.
+  signAndEditExecutable: false
 
 nsis:
   oneClick: false
