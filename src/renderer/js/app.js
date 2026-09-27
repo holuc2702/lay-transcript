@@ -89,6 +89,25 @@ function containsCjk(s) {
 // Khởi tạo
 // ---------------------------------------------------------------------------
 
+// Đoán nền tảng NGAY LẬP TỨC, không chờ main process.
+//
+// Trước đây `document.body.dataset.platform` chỉ được gán SAU khi
+// `await window.api.app.info()` trả về — lần chạy đầu mất 10-30 giây vì macOS
+// xác minh chữ ký. Trong lúc đó CSS chưa chừa chỗ cho ba nút đỏ/vàng/xanh nên
+// chúng đè lên logo, rồi 30 giây sau mới "thụt vào trong". Đúng như người dùng
+// báo. `navigator` có sẵn ngay khi script chạy, dùng nó là xong.
+(function detectPlatformEarly() {
+  try {
+    const ua = String(navigator.userAgent || '');
+    const pf = String(navigator.platform || '');
+    const isMac = /mac/i.test(pf) || /macintosh/i.test(ua);
+    const isWin = /win/i.test(pf) || /windows/i.test(ua);
+    document.body.dataset.platform = isMac ? 'darwin' : isWin ? 'win32' : 'unknown';
+  } catch {
+    /* DOM chưa sẵn sàng thì init() sẽ thử lại */
+  }
+})();
+
 async function init() {
   // NỐI MỌI SỰ KIỆN TRƯỚC, MỌI `await` SAU.
   //
@@ -130,15 +149,14 @@ async function init() {
     mark.replaceChildren(img);
   }
 
-  // Từ đây mới được await. Nền tảng cũng lấy bất đồng bộ, không chặn.
+  // Lấy lại nền tảng chính xác từ main process (không chặn). Thường sẽ trùng
+  // với đoán ở trên; nếu khác thì ghi đè.
   window.api.app
     .info()
     .then((info) => {
-      document.body.dataset.platform = info.platform;
+      if (info && info.platform) document.body.dataset.platform = info.platform;
     })
-    .catch(() => {
-      document.body.dataset.platform = 'unknown';
-    });
+    .catch(() => {});
 
   await loadCatalogs();
   void refreshSystemInfo();
@@ -281,7 +299,19 @@ function wireAllEvents() {
     try {
       await window.api.app.checkForUpdates();
     } catch (err) {
-      toast(err.message, 'error');
+      // Bản app CŨ (trước khi có tính năng cập nhật) sẽ báo
+      // "No handler registered for 'app:checkForUpdates'". Dịch ra tiếng Việt
+      // và chỉ đường tải bản mới, thay vì hiện lỗi kỹ thuật.
+      const msg = String(err?.message || err);
+      if (/No handler registered/i.test(msg)) {
+        toast(
+          'Bản app này quá cũ, chưa có tính năng tự cập nhật. ' +
+            'Hãy tải bản mới nhất từ trang Releases (nút bên cạnh).',
+          'error'
+        );
+      } else {
+        toast(msg, 'error');
+      }
     } finally {
       btn.disabled = false;
     }
