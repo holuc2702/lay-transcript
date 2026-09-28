@@ -1332,12 +1332,19 @@ async function translateAllIntoBox() {
   if (btn) btn.disabled = true;
   if (info) info.textContent = 'Đang dịch bằng máy…';
   try {
-    const r = await window.api.dubbing.translateAll(dubState.segments);
-    setScriptBox(r.join('\n'));
-    if (info) info.textContent = `Đã dịch ${r.filter(Boolean).length} đoạn. Sửa bên phải nếu cần.`;
-    const si = $('#dubScriptInfo');
-    if (si) si.textContent = 'Bản dịch đã sẵn sàng — đọc lại rồi bấm “Chuốt bản này”.';
-    dubLog(`Đã dịch ${r.length} đoạn bằng máy.`);
+    const sel = $('#dubModelSel');
+    const ids = sel && sel.value ? [sel.value] : [];
+    const r = await window.api.dubbing.translateAll(dubState.segments, ids);
+    setScriptBox(r.segments.join('\n'));
+    const used = (r.providers || []).join(', ') || 'không rõ';
+    if (info) {
+      info.textContent = `Đã dịch ${r.segments.filter(Boolean).length}/${r.segments.length} đoạn bằng: ${used}.`;
+    }
+    if (r.fallback) {
+      toast('Mô hình chính bị lỗi, app đã dùng phương án dự phòng — chất lượng có thể kém hơn.', 'error');
+    }
+    await autoResegment();
+    dubLog(`Đã dịch bằng: ${used}.`);
   } catch (err) {
     if (info) info.textContent = 'Không dịch được: ' + err.message;
     toast(String(err.message).split('\n')[0], 'error');
@@ -1362,6 +1369,8 @@ function updateApplyBtn() {
   const hasText = !!($('#dubScriptBox')?.value || '').trim();
   // Nguồn "gốc" không cần căn lại — dùng thẳng khung gốc.
   btn.disabled = !hasBase || !hasText;
+  const rs = $('#btnResegment');
+  if (rs) rs.disabled = !hasBase || !hasText;
 }
 
 /** Cột lời thoại gốc, để đối chiếu cạnh bản dịch. */
@@ -1454,40 +1463,25 @@ async function showDubResult(r) {
   const box = $('#dubPreviewBox');
   const card = $('#cardPreview');
   if (!box || !card) return;
-  const dir = r.wav.replace(/[/\\][^/\\]*$/, '');
   card.hidden = false;
   // Đăng ký file qua protocol ltmedia:// — không dùng file:// (bị CSP/CORS chặn).
   const urls = await window.api.dubbing.registerMedia({ mp3: r.mp3, wav: r.wav, srt: r.srt });
+  // Chỉ player + một nút mở thư mục. Trước đây có 4 nút Mở .wav/.mp3/.srt
+  // lặp với những nút ở thẻ phía trên, nhìn rối và thừa.
+  const dir = r.dir || r.wav.replace(/[/\\][^/\\]*$/, '');
   box.innerHTML = `
     <div class="preview-row">
       <audio controls preload="metadata" src="${escapeAttr(urls.mp3 || urls.wav || '')}"></audio>
-      <button class="btn tiny" data-dopen="${escapeAttr(r.wav)}">Mở .wav</button>
-      ${r.mp3 ? `<button class="btn tiny" data-dopen="${escapeAttr(r.mp3)}">Mở .mp3</button>` : ''}
-      <button class="btn tiny" data-dopen="${escapeAttr(r.srt)}">Mở .srt</button>
-      <button class="btn tiny primary" data-dreveal="${escapeAttr(r.wav)}">Mở thư mục</button>
-    </div>
-    <div class="preview-row">
-      <span class="hint" style="margin:0">Bản dịch + thời gian đã căn:</span>
-      <button class="btn tiny" data-dopen="${escapeAttr(r.srt)}">Mở .srt</button>
+      <button class="btn tiny primary" data-dreveal="${escapeAttr(r.wav)}">Mở thư mục kết quả</button>
     </div>`;
-  box.querySelectorAll('[data-dopen]').forEach((b) => {
-    b.addEventListener('click', () => window.api.app.openPath(b.dataset.dopen));
-  });
   box.querySelector('[data-dreveal]')?.addEventListener('click', (e) => {
     window.api.dubbing.reveal(e.currentTarget.dataset.dreveal);
   });
   const info = $('#dubPreviewInfo');
   if (info) {
-    info.innerHTML =
-      `<div>Thư mục kết quả: <code>${escapeHtml(dir)}</code></div>` +
-      (r.voiceDir
-        ? `<div style="margin-top:4px">Voice từng câu đã lưu: <code>${escapeHtml(r.voiceDir)}</code> ` +
-          `(${r.voices.length} file — lần sau lấy lại khỏi tạo voice)</div>`
-        : '') +
-      `<div style="margin-top:4px">${escapeHtml(
-        `${r.summary.sped}/${r.summary.total} đoạn được tua nhẹ (tối đa ${r.summary.maxSpeed}x), ` +
-          `đoạn trôi nhiều nhất ${r.summary.maxDrift}s.`
-      )}</div>`;
+    info.textContent =
+      `Thư mục: ${outDirPath}  ·  ${r.summary.sped}/${r.summary.total} đoạn được tua nhẹ ` +
+      `(tối đa ${r.summary.maxSpeed}x), trôi nhiều nhất ${r.summary.maxDrift}s.`;
   }
 }
 
@@ -1521,6 +1515,44 @@ function dubLog(msg) {
   box.scrollTop = box.scrollHeight;
 }
 
+/** Nạp danh sách mô hình dịch vào ô chọn ở Bước 4. */
+async function loadModelSelect() {
+  const sel = $('#dubModelSel');
+  if (!sel) return;
+  let list = [];
+  try {
+    list = await window.api.providers.list();
+  } catch {
+    return;
+  }
+  // Chỉ hiện provider dùng được: có key, hoặc không cần key.
+  const usable = list.filter((p) => p.noKey || (p.keys || []).length);
+  if (!usable.length) {
+    sel.innerHTML = '<option value="">Chưa cấu hình nhà cung cấp dịch</option>';
+    sel.disabled = true;
+    return;
+  }
+  sel.disabled = false;
+  sel.innerHTML = usable
+    .map((p) => {
+      const name = p.model ? `${p.label} · ${p.model}` : p.label;
+      return `<option value="${escapeAttr(p.id)}">${escapeHtml(name)}</option>`;
+    })
+    .join('');
+  // Ưu tiên mô hình chất lượng cao nếu có: ollama-cloud, rồi openai, rồi gemini.
+  const pref = ['ollama-cloud', 'openai', 'gemini', 'ollama-local'];
+  for (const id of pref) {
+    if (usable.some((p) => p.id === id)) {
+      sel.value = id;
+      break;
+    }
+  }
+  dubState.providerId = sel.value;
+  sel.addEventListener('change', () => {
+    dubState.providerId = sel.value;
+  });
+}
+
 async function initDubbing() {
   // Quyết định macOS CHỈ dựa vào navigator — không gọi app.info().
   // `app:info` phải xác minh chữ ký các binary (yt-dlp, sidecar) nên lần chạy
@@ -1530,6 +1562,7 @@ async function initDubbing() {
   if ($('#dubMac')) $('#dubMac').hidden = !mac;
   if ($('#dubUnsupported')) $('#dubUnsupported').hidden = mac;
   if (!mac) return;
+  await loadModelSelect();
 
   // Tự đăng nhập nếu trước đó đã chọn "Ghi nhớ mật khẩu".
   let on = false;
@@ -1712,12 +1745,39 @@ function wireDubbing() {
     if (r.hadTimestamps) {
       toast('File có sẵn số phút — app đã bỏ số phút đi và sẽ tự căn lại.', 'ok');
     }
-    toast('Đã nạp bản dịch. Kiểm tra rồi bấm “Áp dụng & căn timing”.');
+    await autoResegment();
+    toast('Đã nạp và tự tách câu theo bản gốc. Kiểm tra rồi bấm “Áp dụng & căn timing”.');
   });
 
   $('#dubScriptBox')?.addEventListener('input', () => {
     dubState.scriptEdited = true;
-    $('#btnApplyScript').disabled = !$('#dubScriptBox').value.trim() || !dubState.sourceSegments.length;
+    updateApplyBtn();
+  });
+
+  // Tự tách câu theo nhịp câu của bản gốc.
+  $('#btnResegment')?.addEventListener('click', async () => {
+    const ta = $('#dubScriptBox');
+    const info = $('#dubScriptInfo');
+    if (!ta || !dubState.sourceSegments.length) return;
+    const btn = $('#btnResegment');
+    btn.disabled = true;
+    btn.textContent = 'Đang tách…';
+    try {
+      const r = await window.api.dubbing.resegment(ta.value, dubState.sourceSegments);
+      ta.value = r.text;
+      if (info) {
+        info.textContent = r.changed
+          ? `Đã tách lại: ${r.before} → ${r.after} câu, theo nhịp của bản gốc.`
+          : 'Bản dịch đã đúng nhịp câu, không cần tách thêm.';
+      }
+      dubLog(`Tự tách câu: ${r.before} → ${r.after} câu.`);
+      updateApplyBtn();
+    } catch (err) {
+      toast(String(err.message).split('\n')[0], 'error');
+    } finally {
+      btn.textContent = 'Tự tách câu';
+      btn.disabled = false;
+    }
   });
 
   $('#btnTtsLogout')?.addEventListener('click', async () => {

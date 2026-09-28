@@ -125,8 +125,8 @@
             <div class="field">
               <label class="field-label" for="dubVoice">Giọng đọc</label>
               <select id="dubVoice">
+                <option value="LÊ MINH" selected>LÊ MINH</option>
                 <option value="HOÀNG">HOÀNG</option>
-                <option value="LÊ MINH">LÊ MINH</option>
               </select>
               <p class="hint">
                 Giọng lấy đúng danh sách trên trang 3A. Muốn thêm giọng khác thì
@@ -156,15 +156,15 @@
               Chọn một trong hai:
             </p>
             <div class="src-picker">
-              <label class="src-opt active">
-                <input type="radio" name="dubSrc" value="history" checked />
+              <label class="src-opt">
+                <input type="radio" name="dubSrc" value="history" />
                 <div>
                   <b>Từ lịch sử</b>
                   <small>Video đã tạo transcript — dùng lại được ngay.</small>
                 </div>
               </label>
-              <label class="src-opt">
-                <input type="radio" name="dubSrc" value="source" />
+              <label class="src-opt active">
+                <input type="radio" name="dubSrc" value="source" checked />
                 <div>
                   <b>Từ file trên máy</b>
                   <small>Video/audio chưa từng làm — app sẽ tự nhận diện.</small>
@@ -180,10 +180,13 @@
               <div class="row">
                 <input type="text" id="dubSourcePath" readonly placeholder="Chưa chọn file" />
                 <button class="btn" id="btnPickSource">Chọn file…</button>
-                <button class="btn" id="btnAnalyzeSource" disabled>Nhận diện</button>
+                <button class="btn primary is-callout" id="btnAnalyzeSource" disabled>
+                  Phân tích
+                </button>
               </div>
               <p class="hint" id="dubSourceInfo">
-                App chỉ tải phần audio về máy để nhận diện, không tải video từ
+                Bấm <strong>Phân tích</strong> để app lấy audio và tự nhận dạng
+                lời thoại, tách câu theo đúng ngôn ngữ gốc. Không tải video từ
                 YouTube. Video dài có thể mất vài phút.
               </p>
             </div>
@@ -199,9 +202,12 @@
             </p>
 
             <div class="row wrap" style="margin-bottom:12px">
-              <button class="btn tiny" id="btnDubTranslate">Dịch lại bằng máy</button>
+              <label class="field-label" for="dubModelSel" style="margin:0">Dịch bằng</label>
+              <select id="dubModelSel" class="inline-sel"></select>
+              <button class="btn tiny primary" id="btnDubTranslate">Dịch lại</button>
               <button class="btn tiny" id="btnUseOriginal">Dùng luôn lời gốc</button>
               <button class="btn tiny" id="btnPickTrans">Dán bản dịch của tôi…</button>
+              <button class="btn tiny" id="btnResegment" disabled>Tự tách câu</button>
               <span class="hint" id="dubTransProgress" style="margin:0"></span>
             </div>
 
@@ -218,7 +224,10 @@
                   placeholder="Bản dịch sẽ hiện ở đây. Bạn sửa thoải mái."></textarea>
                 <p class="hint" style="margin-top:6px">
                   Mỗi dòng là một câu. Dấu <code>--</code> giữa hai câu nghĩa là bạn
-                  tự tách ranh giới thời gian cho câu đó.
+                  tự tách ranh giới thời gian cho câu đó — app luôn tôn trọng dấu
+                  này. Nếu bản dịch bị gom thành khối dài, bấm
+                  <strong>Tự tách câu</strong> để cắt lại theo đúng nhịp câu của
+                  bản gốc.
                 </p>
               </div>
             </div>
@@ -243,7 +252,7 @@
           </div>
 
           <div class="card" id="cardPreview" hidden>
-            <h3>Nghe thử &amp; mở thư mục</h3>
+            <h3>Nghe thử</h3>
             <div class="row wrap" id="dubPreviewBox"></div>
             <p class="hint" id="dubPreviewInfo"></p>
           </div>

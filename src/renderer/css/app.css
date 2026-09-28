@@ -1217,3 +1217,28 @@ details p {
   flex-wrap: wrap;
   margin-bottom: 6px;
 }
+
+/* Nút "Phân tích" — sáng lên để người dùng biết có việc cần bấm */
+.is-callout {
+  animation: calloutPulse 2.4s ease-in-out infinite;
+}
+
+.is-callout:disabled {
+  animation: none;
+  opacity: 0.45;
+}
+
+@keyframes calloutPulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(79, 140, 255, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(79, 140, 255, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .is-callout {
+    animation: none;
+  }
+}

@@ -20,6 +20,7 @@ const tts = require('./tts');
 const timing = require('./timing');
 const dubbing = require('./dubbing');
 const align = require('./align');
+const resegment = require('./resegment');
 
 const isDev = !app.isPackaged;
 
@@ -659,10 +660,11 @@ handle('dubbing:align', (translatedText, originalSegments) =>
  * Dịch toàn bộ các đoạn, để người dùng XEM LẠI và sửa trước khi tạo voice.
  * Trả về mảng văn bản đã dịch, giữ nguyên thứ tự.
  */
-handle('dubbing:translateAll', async (segments) => {
+handle('dubbing:translateAll', async (segments, providerIds) => {
   if (!Array.isArray(segments) || !segments.length) throw new Error('Chưa có nội dung.');
   const log = (message) => broadcast('dubbing:progress', { message });
   const out = [];
+  const used = new Set();
   let failed = 0;
   for (let i = 0; i < segments.length; i++) {
     const src = String(segments[i].text || '').trim();
@@ -671,8 +673,9 @@ handle('dubbing:translateAll', async (segments) => {
       continue;
     }
     try {
-      const r = await providers.translate(src);
+      const r = await providers.translate(src, { providerIds });
       out.push(r.text);
+      if (r.providerLabel) used.add(r.providerLabel);
     } catch {
       failed++;
       out.push(src); // dịch lỗi thì giữ nguyên, người dùng tự sửa
@@ -682,7 +685,14 @@ handle('dubbing:translateAll', async (segments) => {
     }
   }
   if (failed) log(`Có ${failed} đoạn không dịch được, giữ nguyên tiếng gốc.`);
-  return out;
+  // Báo rõ đã dùng nhà cung cấp nào. Nếu có nhiều hơn một, nghĩa là đã phải
+  // lùi xuống nhà cung cấp dự phòng — người dùng cần biết để không tưởng
+  // mình đang dùng mô hình mình chọn.
+  const list = Array.from(used);
+  if (list.length > 1) {
+    log(`Lưu ý: dịch bằng nhiều nguồn (${list.join(', ')}) — nguồn chính có thể đã lỗi.`);
+  }
+  return { segments: out, providers: list, fallback: list.length > 1, failed };
 });
 
 /** Đăng ký file âm thanh để renderer phát được, trả về URL ltmedia://… */
@@ -702,6 +712,12 @@ handle('dubbing:reveal', (file) => {
   if (!file) return false;
   shell.showItemInFolder(file);
   return true;
+});
+
+/** Tự tách câu bản dịch theo nhịp câu của bản gốc. */
+handle('dubbing:resegment', (translatedText, originalSegments) => {
+  const r = resegment.resegmentTranslation(translatedText, originalSegments);
+  return r;
 });
 
 /** Đọc nội dung một file .srt đã tạo để xem lại. */
@@ -846,8 +862,13 @@ handle('dubbing:run', async (payload) => {
   // ---- 4. Ghép ----
   const base =
     String(outName).replace(/[<>:"/\|?*\x00-\x1f]/g, ' ').trim() || 'lồng tiếng';
-  const wav = path.join(outDir, `${base}.wav`);
-  const mp3 = path.join(outDir, `${base}.mp3`);
+  // MỖI VIDEO MỘT THƯ MỤC RIÊNG, và thư mục đó chỉ có đúng 3 file
+  // (.wav .mp3 .srt). Trước đây tất cả đổ chung một thư mục nên mở ra nhiều
+  // video là thấy đống file lẫn lộn.
+  const videoDir = path.join(outDir, base);
+  fs.mkdirSync(videoDir, { recursive: true });
+  const wav = path.join(videoDir, `${base}.wav`);
+  const mp3 = path.join(videoDir, `${base}.mp3`);
   await dubbing.merge(
     fitted.map((f) => {
       const p = parts.find((x) => x.i === f.index);
@@ -865,7 +886,7 @@ handle('dubbing:run', async (payload) => {
   await dubbing.toMp3(wav, mp3, ffmpegPath).catch(() => null);
 
   // ---- 5. SRT bản dịch để đối chiếu ----
-  const srtFile = path.join(outDir, `${base}.srt`);
+  const srtFile = path.join(videoDir, `${base}.srt`);
   const fmt = (sec) => {
     const ms = Math.max(0, Math.round(sec * 1000));
     const h = Math.floor(ms / 3600000);
@@ -882,6 +903,7 @@ handle('dubbing:run', async (payload) => {
   fs.writeFileSync(srtFile, srt, 'utf8');
 
   return {
+    dir: videoDir,
     wav,
     mp3: fs.existsSync(mp3) ? mp3 : null,
     srt: srtFile,

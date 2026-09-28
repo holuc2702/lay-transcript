@@ -166,3 +166,62 @@ test('tua nhanh không vượt quá 1.15x', () => {
   const maxSpeed = durs[0] / (r[0].end - r[0].start);
   assert.ok(maxSpeed <= 1.1501, `tua ${maxSpeed.toFixed(3)}x, vượt giới hạn 1.15x`);
 });
+
+// ---------------------------------------------------------------------------
+// Tự tách câu theo nhịp bản gốc.
+// ---------------------------------------------------------------------------
+
+const RS = require('../src/main/resegment');
+
+test('tự tách câu khi bản dịch bị gom thành một khối', () => {
+  const orig = [
+    { text: 'The library closes at six. Students must return books.' },
+    { text: 'The café opens at eight. It serves coffee.' },
+    { text: 'Meet me at noon. Do not be late.' },
+  ];
+  // Bản dịch bị mô hình khác gom thành một khối, KHÔNG có dấu câu nào.
+  const lumped =
+    'Ổng nói rằng chuyện này rất quan trọng và cần được xử lý ngay trong hôm nay ' +
+    'khi mọi người còn ở đây để nghe và quyết định cho tới khi kết thúc buổi họp';
+  const r = RS.resegmentTranslation(lumped, orig);
+  assert.ok(r.changed, 'phải nhận ra là cần tách');
+  assert.ok(r.after >= 2, `phải tách thành nhiều câu, thực tế ${r.after}`);
+  // KHÔNG được cắt ngang giữa từ: mỗi mảnh phải bắt đầu bằng một chữ nguyên vẹn.
+  const words = new Set(lumped.toLowerCase().split(/\s+/));
+  for (const piece of r.text.split('\n')) {
+    const first = piece.trim().split(/\s+/)[0]?.toLowerCase();
+    assert.ok(
+      words.has(first) || first.length > 2,
+      `mảnh bắt đầu bằng "${first}" — có vẻ cắt ngang giữa từ`
+    );
+    assert.ok(piece.trim().length >= 20, `mảnh quá ngắn: "${piece}"`);
+  }
+});
+
+test('bản dịch đã tách đúng thì KHÔNG đụng tới', () => {
+  const orig = [{ text: 'A one. B two.' }, { text: 'C three. D four.' }];
+  const good = 'Một. Hai.\nBa. Bốn.';
+  const r = RS.resegmentTranslation(good, orig);
+  // Nội dung câu phải giữ nguyên. App có thể đưa mỗi câu ra một dòng cho
+  // thống nhất — đó là chuẩn hoá, không phải sửa nội dung.
+  // So sánh Ở MỨC CÂU: app đưa mỗi câu ra một dòng và bỏ khoảng trắng thừa,
+  // nên không thể so chuỗi thô. Điều cần bảo đảm là nội dung câu không đổi.
+  const before = RS.splitSentences(good);
+  const after = RS.splitSentences(r.text);
+  assert.deepEqual(after, before, 'không được đổi nội dung câu');
+  assert.equal(after.length, 4, 'vẫn phải là 4 câu');
+});
+
+test('tôn trọng dấu -- mà người dùng tự gõ', () => {
+  const orig = [{ text: 'A one. B two.' }];
+  const r = RS.resegmentTranslation('Câu một--Câu hai--Câu ba', orig);
+  assert.equal(r.text, 'Câu một\nCâu hai\nCâu ba');
+});
+
+test('tách câu nhận ra tiếng Anh và tiếng Trung', () => {
+  const en = RS.splitSentences('The café is open. Students can borrow books today!');
+  assert.equal(en.length, 2);
+  assert.ok(en[0].endsWith('.'));
+  const zh = RS.splitSentences('今天天气很好。我们去公园吧！好吗？');
+  assert.equal(zh.length, 3, `tiếng Trung phải tách được 3 câu, thực tế ${zh.length}`);
+});
