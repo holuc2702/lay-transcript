@@ -1317,6 +1317,35 @@ function markTtsLoggedIn() {
  * Chưa mở khoá Bước 5 cho tới khi người dùng duyệt xong bản dịch.
  */
 
+/**
+ * Dịch TOÀN BỘ bằng API rồi đổ vào ô xem lại.
+ * Đây là đường đi mặc định: chọn xong nguồn là app dịch luôn, không bắt
+ * người dùng bấm thêm một nút.
+ */
+async function translateAllIntoBox() {
+  if (!dubState.segments.length) {
+    toast('Chưa có lời thoại để dịch.', 'error');
+    return;
+  }
+  const btn = $('#btnDubTranslate');
+  const info = $('#dubTransProgress');
+  if (btn) btn.disabled = true;
+  if (info) info.textContent = 'Đang dịch bằng máy…';
+  try {
+    const r = await window.api.dubbing.translateAll(dubState.segments);
+    setScriptBox(r.join('\n'));
+    if (info) info.textContent = `Đã dịch ${r.filter(Boolean).length} đoạn. Sửa bên phải nếu cần.`;
+    const si = $('#dubScriptInfo');
+    if (si) si.textContent = 'Bản dịch đã sẵn sàng — đọc lại rồi bấm “Chuốt bản này”.';
+    dubLog(`Đã dịch ${r.length} đoạn bằng máy.`);
+  } catch (err) {
+    if (info) info.textContent = 'Không dịch được: ' + err.message;
+    toast(String(err.message).split('\n')[0], 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 /** Điền lời thoại sẽ đọc vào ô xem lại. */
 function setScriptBox(text) {
   const ta = $('#dubScriptBox');
@@ -1333,23 +1362,6 @@ function updateApplyBtn() {
   const hasText = !!($('#dubScriptBox')?.value || '').trim();
   // Nguồn "gốc" không cần căn lại — dùng thẳng khung gốc.
   btn.disabled = !hasBase || !hasText;
-}
-
-/** Đổi cách lấy lời thoại -> tự điền lời thoại cho hợp lý. */
-function onTextSourceChanged() {
-  if (dubState.textSource === 'original') {
-    setScriptBox(dubState.segments.map((s) => s.text.trim()).filter(Boolean).join('\n'));
-    const info = $('#dubScriptInfo');
-    if (info) info.textContent = 'Đang dùng lời gốc — bấm “Áp dụng” để xác nhận.';
-  } else if (dubState.textSource === 'machine') {
-    setScriptBox('');
-    const info = $('#dubScriptInfo');
-    if (info) info.textContent = 'Bấm “Dịch toàn bộ” hoặc tự dán bản dịch vào ô bên phải.';
-  } else {
-    setScriptBox(dubState.ownText || '');
-    const info = $('#dubScriptInfo');
-    if (info) info.textContent = 'Dán bản dịch của bạn vào ô bên phải (mỗi dòng một câu).';
-  }
 }
 
 /** Cột lời thoại gốc, để đối chiếu cạnh bản dịch. */
@@ -1397,11 +1409,13 @@ function setDubSourceReady(title, count) {
   if (rb) rb.disabled = true;  // chỉ mở sau khi bấm Áp dụng
   const card = $('#cardTranslate');
   if (card) card.hidden = false;
-  dubState.script = []; // chưa duyệt thì chưa được tạo voice
-  if (!$('#dubScriptBox')?.value.trim() || dubState.textSource === 'original') {
-    setScriptBox(dubState.segments.map((s) => s.text.trim()).filter(Boolean).join('\n'));
-  }
+  dubState.script = []; // chưa chuốt thì chưa được tạo voice
   renderOriginalColumn();
+
+  // Tự dịch ngay bằng API rồi hiện ra để người dùng sửa.
+  // Đây là luồng mặc định: không bắt ai phải bấm thêm một nút.
+  setScriptBox('');
+  void translateAllIntoBox();
   dubLog(`Sẵn sàng: ${count} đoạn. Xem lại bản dịch ở Bước 4.`);
 }
 
@@ -1640,6 +1654,8 @@ function wireDubbing() {
       dubState.script = [];
       dubState.title = '';
       setScriptBox('');
+      const tp = $('#dubTransProgress');
+      if (tp) tp.textContent = '';
       renderOriginalColumn();
       $('#cardTranslate').hidden = true;
       $('#btnDubRun').disabled = true;
@@ -1676,16 +1692,16 @@ function wireDubbing() {
   });
 
   // Nguồn 3: bản dịch có sẵn
-  // Nguồn lời thoại ở Bước 4: gốc / dịch máy / bản dịch của bạn.
-  $$('input[name=dubText]').forEach((r) => {
-    r.addEventListener('change', () => {
-      $$('.src-opt input[name=dubText]').forEach((x) =>
-        x.closest('.src-opt').classList.toggle('active', x.checked)
-      );
-      $$('.txt-body').forEach((b) => (b.hidden = b.dataset.txtbody !== r.value));
-      dubState.textSource = r.value;
-      onTextSourceChanged();
-    });
+  // Bấm "Dịch lại bằng máy" -> dịch toàn bộ bằng API rồi đổ vào ô xem lại.
+  $('#btnDubTranslate')?.addEventListener('click', () => translateAllIntoBox());
+
+  // Bấm "Dùng luôn lời gốc" -> chép thẳng lời gốc vào ô xem lại.
+  $('#btnUseOriginal')?.addEventListener('click', () => {
+    const txt = dubState.segments.map((x) => String(x.text || '').trim()).filter(Boolean).join('\n');
+    setScriptBox(txt);
+    const info = $('#dubScriptInfo');
+    if (info) info.textContent = 'Đang dùng lời gốc, chưa dịch.';
+    dubLog('Dùng lời gốc, bỏ qua bước dịch.');
   });
 
   $('#btnPickTrans')?.addEventListener('click', async () => {
@@ -1713,26 +1729,6 @@ function wireDubbing() {
   });
 
   window.api.dubbing.onProgress(({ message }) => dubLog(message));
-
-  // ---- Bước 4: dịch toàn bộ, xem lại, sửa ----
-  $('#btnDubTranslate')?.addEventListener('click', async () => {
-    const btn = $('#btnDubTranslate');
-    const info = $('#dubTransProgress');
-    btn.disabled = true;
-    btn.textContent = 'Đang dịch…';
-    try {
-      const r = await window.api.dubbing.translateAll(dubState.segments);
-      const ta = $('#dubScriptBox');
-      if (ta) ta.value = r.join('\n');
-      if (info) info.textContent = `Đã dịch ${r.length} đoạn. Đọc lại và sửa nếu cần.`;
-      $('#btnApplyScript').disabled = false;
-    } catch (err) {
-      toast(String(err.message).split('\n')[0], 'error');
-    } finally {
-      btn.disabled = false;
-      btn.textContent = 'Dịch toàn bộ';
-    }
-  });
 
   $('#dubScriptBox')?.addEventListener('input', () => {
     if ($('#dubScriptBox').value.trim()) $('#btnApplyScript').disabled = false;

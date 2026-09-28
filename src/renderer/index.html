@@ -192,56 +192,41 @@
           </div>
 
           <div class="card" id="cardTranslate" hidden>
-            <h3>Bước 4 — Chọn lời thoại &amp; duyệt lại</h3>
+            <h3>Bước 4 — Xem lại bản dịch &amp; sửa cho đọc chuẩn</h3>
             <p class="hint">
-              Chọn cách lấy lời thoại, sửa cho đúng rồi mới tạo voice — tránh tốn
-              thời gian và quota rồi mới phát hiện sai.
+              App đã dịch sẵn bằng API. Sửa bên phải để giọng đọc đúng ý — càng
+              sát lời gốc càng dễ hiểu.
             </p>
 
-            <div class="src-picker">
-              <label class="src-opt active">
-                <input type="radio" name="dubText" value="original" checked />
-                <div><b>Dùng lời gốc</b><small>Đọc thẳng tiếng Anh/Trung, không dịch.</small></div>
-              </label>
-              <label class="src-opt">
-                <input type="radio" name="dubText" value="machine" />
-                <div><b>Dịch bằng máy</b><small>Dùng nhà cung cấp dịch ở phần Cài đặt.</small></div>
-              </label>
-              <label class="src-opt">
-                <input type="radio" name="dubText" value="own" />
-                <div><b>Bản dịch của tôi</b><small>Dán file .txt/.srt sẵn có, hoặc gõ tay.</small></div>
-              </label>
+            <div class="row wrap" style="margin-bottom:12px">
+              <button class="btn tiny" id="btnDubTranslate">Dịch lại bằng máy</button>
+              <button class="btn tiny" id="btnUseOriginal">Dùng luôn lời gốc</button>
+              <button class="btn tiny" id="btnPickTrans">Dán bản dịch của tôi…</button>
+              <span class="hint" id="dubTransProgress" style="margin:0"></span>
             </div>
 
-            <div class="txt-body" data-txtbody="machine" hidden>
-              <button class="btn" id="btnDubTranslate" disabled>Dịch toàn bộ</button>
-              <span class="hint" id="dubTransProgress"></span>
-            </div>
-
-            <div class="txt-body" data-txtbody="own" hidden>
-              <div class="row">
-                <input type="text" id="dubTransPath" readonly placeholder="Chọn .txt hoặc .srt (không bắt buộc)" />
-                <button class="btn" id="btnPickTrans">Chọn file…</button>
-              </div>
-            </div>
-
-            <div class="cmp-grid" style="margin-top:14px">
+            <div class="cmp-grid">
               <div class="cmp-col">
-                <label class="field-label">Lời thoại gốc (để đối chiếu)</label>
+                <label class="field-label">Lời gốc — để đối chiếu (không sửa)</label>
                 <div id="dubOriginalBox" class="cmp-orig"></div>
               </div>
               <div class="cmp-col">
-                <label class="field-label" for="dubScriptBox">Lời thoại sẽ đọc — sửa tại đây</label>
-                <textarea id="dubScriptBox" rows="10" placeholder="Nội dung sẽ đọc. Mỗi dòng là một câu."></textarea>
-                <p class="hint">
-                  Dấu <code>--</code> giữa hai câu = ranh giới thời gian do bạn tự
-                  đánh dấu. Bỏ trống để lấy lời gốc.
+                <label class="field-label" for="dubScriptBox">
+                  Bản dịch tiếng Việt — sẽ được đọc
+                </label>
+                <textarea id="dubScriptBox" rows="12"
+                  placeholder="Bản dịch sẽ hiện ở đây. Bạn sửa thoải mái."></textarea>
+                <p class="hint" style="margin-top:6px">
+                  Mỗi dòng là một câu. Dấu <code>--</code> giữa hai câu nghĩa là bạn
+                  tự tách ranh giới thời gian cho câu đó.
                 </p>
               </div>
             </div>
 
             <div class="row wrap" style="margin-top:12px">
-              <button class="btn primary" id="btnApplyScript" disabled>Áp dụng &amp; căn timing</button>
+              <button class="btn primary" id="btnApplyScript" disabled>
+                Chuốt bản này &amp; căn timing
+              </button>
             </div>
             <p class="hint" id="dubScriptInfo"></p>
           </div>
