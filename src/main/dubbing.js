@@ -40,44 +40,66 @@ function run(bin, args, timeout = 15 * 60_000) {
  * @param {Array<{file:string, start:number, speed:number}>} parts
  * @param {string} outFile
  * @param {string} ffmpegPath
- * @param {object} opts { workDir, onProgress }
+ * @param {object} opts { workDir, onProgress, probeDuration }
  */
-async function merge(parts, outFile, ffmpegPath, { workDir, onProgress } = {}) {
+async function merge(parts, outFile, ffmpegPath, { workDir, onProgress, probeDuration } = {}) {
   const valid = parts.filter((p) => p.file && fs.existsSync(p.file) && Number.isFinite(p.start));
   if (!valid.length) throw new Error('Không có file voice nào để ghép.');
 
   const tmpDir = workDir || path.dirname(outFile);
   fs.mkdirSync(tmpDir, { recursive: true });
 
-  const total = Math.max(...valid.map((p) => p.start + (p.duration || 0))) + 2;
+  // ---------------------------------------------------------- chống chồng tiếng
+  //
+  // Lớp bảo vệ thứ hai, độc lập với bộ căn: dù cho thứ tự hay số liệu có sai,
+  // mỗi file vẫn được dời sang sau mốc kết thúc THẬT của file trước. Nhờ vậy
+  // không bao giờ có hai đoạn phát cùng lúc.
+  const placed = [];
+  let guard = 0;
+  for (const p of valid) {
+    let start = Math.max(0, p.start);
+    let dur = Number(p.duration);
+    if ((!isFinite(dur) || dur <= 0) && probeDuration) {
+      dur = await probeDuration(p.file, ffmpegPath).catch(() => 0);
+    }
+    if (!isFinite(dur) || dur <= 0) {
+      onProgress?.({ phase: 'merge', message: `Bỏ qua một đoạn (không đo được thời lượng).` });
+      continue;
+    }
+    const prev = placed[placed.length - 1];
+    if (prev) {
+      const minStart = prev.start + prev.realDuration + 0.05; // +50ms chống chạm mép
+      if (start < minStart) {
+        if (guard++ < 3) {
+          onProgress?.({
+            phase: 'merge',
+            message: 'Phát hiện hai đoạn chồng nhau — đã tự dời đoạn sau ra sau.',
+          });
+        }
+        start = minStart;
+      }
+    }
+    placed.push({ ...p, start, realDuration: dur });
+  }
+  if (!placed.length) throw new Error('Không đo được thời lượng của đoạn nào.');
+
+  const total = Math.max(...placed.map((p) => p.start + p.realDuration)) + 2;
   const inputs = [];
   const filters = [];
-  const labels = [];
 
-  valid.forEach((p, i) => {
-    const raw = path.join(tmpDir, `raw-${i}.wav`);
+  placed.forEach((p, i) => {
     inputs.push('-i', p.file);
-    labels.push(`[${i}:a]`);
-
-    // Chuẩn hoá về 44.1kHz mono 16-bit để amix không bị lệch.
-    let chain = `[${i}:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo[pre${i}]`;
-    filters.push(chain);
-    filters.push(`[pre${i}]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo[v${i}]`);
-
-    // Nếu cần tua (chỉ khi người dùng bật) thì dùng atempo, giới hạn 1.15x
-    const speed = Number(p.speed) || 1;
-    if (speed > 1.001) {
-      filters.push(`[v${i}]atempo=${speed.toFixed(4)}[s${i}]`);
-    } else {
-      filters.push(`[v${i}]anull[s${i}]`);
-    }
+    // Chuẩn hoá về 44.1 kHz stereo để amix không bị lệch.
+    filters.push(`[${i}:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo[n${i}]`);
+    // Dùng đúng thời lượng đo được, KHÔNG cắt hay kéo giãn.
+    filters.push(`[n${i}]apad=whole_dur=${p.realDuration.toFixed(3)},atrim=0:${p.realDuration.toFixed(3)}[t${i}]`);
     const delay = Math.max(0, Math.round(p.start * 1000));
-    filters.push(`[s${i}]adelay=${delay}|${delay}[d${i}]`);
+    filters.push(`[t${i}]adelay=${delay}|${delay}[d${i}]`);
   });
 
-  const mixIn = valid.map((_, i) => `[d${i}]`).join('');
+  const mixIn = placed.map((_, i) => `[d${i}]`).join('');
   filters.push(
-    `${mixIn}amix=inputs=${valid.length}:duration=longest:dropout_transition=0:normalize=0[mixed]`,
+    `${mixIn}amix=inputs=${placed.length}:duration=longest:dropout_transition=0:normalize=0[mixed]`,
     `[mixed]apad=whole_dur=${Math.ceil(total)}[out]`
   );
 
@@ -92,12 +114,12 @@ async function merge(parts, outFile, ffmpegPath, { workDir, onProgress } = {}) {
     outFile,
   ];
 
-  onProgress && onProgress({ phase: 'merge', message: `Đang ghép ${valid.length} đoạn giọng đọc…` });
+  onProgress?.({ phase: 'merge', message: `Đang ghép ${placed.length} đoạn giọng đọc…` });
   await run(ffmpegPath, args);
 
   const stat = fs.statSync(outFile);
   if (!stat.size) throw new Error('File ghép ra rỗng.');
-  return { file: outFile, size: stat.size, expected: total };
+  return { file: outFile, size: stat.size, expected: total, placed: placed.length };
 }
 
 /** Xuất bản mp3 cho dễ nghe/chia sẻ. */

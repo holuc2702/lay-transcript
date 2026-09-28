@@ -1314,6 +1314,25 @@ function markTtsLoggedIn() {
  * Chuẩn bị xong nguồn -> mở khoá Bước 4 (dịch & xem lại).
  * Chưa mở khoá Bước 5 cho tới khi người dùng duyệt xong bản dịch.
  */
+/** Cột lời thoại gốc, để đối chiếu cạnh bản dịch. */
+function renderOriginalColumn() {
+  const box = $('#dubOriginalBox');
+  if (!box) return;
+  const segs = dubState.sourceSegments.length ? dubState.sourceSegments : dubState.segments;
+  if (!segs.length) {
+    box.innerHTML = '<span class="hint">Chưa có lời thoại gốc.</span>';
+    return;
+  }
+  box.innerHTML = segs
+    .map(
+      (s) => `<div class="orig-row">
+        <span class="orig-time">${fmtDuration(s.start)}</span>
+        <span>${escapeHtml(String(s.text || '').trim())}</span>
+      </div>`
+    )
+    .join('');
+}
+
 function setDubSourceReady(title, count) {
   dubState.title = title || '';
   if (!dubState.nameTouched) {
@@ -1341,6 +1360,7 @@ function setDubSourceReady(title, count) {
     const ta = $('#dubScriptBox');
     if (ta) ta.value = dubState.segments.map((s) => s.text.trim()).filter(Boolean).join('\n');
   }
+  renderOriginalColumn();
   dubLog(`Sẵn sàng: ${count} đoạn. Xem lại bản dịch ở Bước 4.`);
 }
 
@@ -1374,23 +1394,26 @@ function parseScriptBox(text) {
 }
 
 /** Hiển thị kết quả: nghe thử + nút mở thư mục. */
-function showDubResult(r) {
+async function showDubResult(r) {
   dubState.lastResult = r;
   const box = $('#dubPreviewBox');
   const card = $('#cardPreview');
   if (!box || !card) return;
   const dir = r.wav.replace(/[/\\][^/\\]*$/, '');
   card.hidden = false;
+  // Đăng ký file qua protocol ltmedia:// — không dùng file:// (bị CSP/CORS chặn).
+  const urls = await window.api.dubbing.registerMedia({ mp3: r.mp3, wav: r.wav, srt: r.srt });
   box.innerHTML = `
     <div class="preview-row">
-      <audio controls preload="none" src="file://${r.mp3 || r.wav}"></audio>
+      <audio controls preload="metadata" src="${escapeAttr(urls.mp3 || urls.wav || '')}"></audio>
       <button class="btn tiny" data-dopen="${escapeAttr(r.wav)}">Mở .wav</button>
       ${r.mp3 ? `<button class="btn tiny" data-dopen="${escapeAttr(r.mp3)}">Mở .mp3</button>` : ''}
       <button class="btn tiny" data-dopen="${escapeAttr(r.srt)}">Mở .srt</button>
       <button class="btn tiny primary" data-dreveal="${escapeAttr(r.wav)}">Mở thư mục</button>
     </div>
     <div class="preview-row">
-      <audio controls preload="none" src="file://${r.srt}"></audio>
+      <span class="hint" style="margin:0">Bản dịch + thời gian đã căn:</span>
+      <button class="btn tiny" data-dopen="${escapeAttr(r.srt)}">Mở .srt</button>
     </div>`;
   box.querySelectorAll('[data-dopen]').forEach((b) => {
     b.addEventListener('click', () => window.api.app.openPath(b.dataset.dopen));
@@ -1400,10 +1423,16 @@ function showDubResult(r) {
   });
   const info = $('#dubPreviewInfo');
   if (info) {
-    info.textContent =
-      `Thư mục: ${dir}\n` +
-      `${r.summary.sped}/${r.summary.total} đoạn được tua nhẹ (tối đa ${r.summary.maxSpeed}x), ` +
-      `đoạn trôi nhiều nhất ${r.summary.maxDrift}s.`;
+    info.innerHTML =
+      `<div>Thư mục kết quả: <code>${escapeHtml(dir)}</code></div>` +
+      (r.voiceDir
+        ? `<div style="margin-top:4px">Voice từng câu đã lưu: <code>${escapeHtml(r.voiceDir)}</code> ` +
+          `(${r.voices.length} file — lần sau lấy lại khỏi tạo voice)</div>`
+        : '') +
+      `<div style="margin-top:4px">${escapeHtml(
+        `${r.summary.sped}/${r.summary.total} đoạn được tua nhẹ (tối đa ${r.summary.maxSpeed}x), ` +
+          `đoạn trôi nhiều nhất ${r.summary.maxDrift}s.`
+      )}</div>`;
   }
 }
 
@@ -1556,13 +1585,13 @@ function wireDubbing() {
     }
   });
 
-  // Chuyển qua lại 3 nguồn ở Bước 3
-  $$('.src-tab').forEach((t) => {
-    t.addEventListener('click', () => {
-      $$('.src-tab').forEach((x) => x.classList.toggle('active', x === t));
-      $$('.src-body').forEach((b) => (b.hidden = b.dataset.srcbody !== t.dataset.src));
-      dubState.source = t.dataset.src;
-      if (t.dataset.src === 'translated') void refreshBaseSelect();
+  // Chuyển qua lại 3 nguồn ở Bước 3 (dạng thẻ chọn, dễ đọc hơn 3 tab)
+  $$('input[name=dubSrc]').forEach((r) => {
+    r.addEventListener('change', () => {
+      $$('.src-opt').forEach((o) => o.classList.toggle('active', o.contains(r) && r.checked));
+      $$('.src-body').forEach((b) => (b.hidden = b.dataset.srcbody !== r.value));
+      dubState.source = r.value;
+      if (r.value === 'translated') void refreshBaseSelect();
     });
   });
 
@@ -1735,20 +1764,13 @@ function wireDubbing() {
         voice: $('#dubVoice').value,
         translate: false,
         outName: $('#dubOutName').value,
+        voiceDirName: dubState.title || 'video',
       });
+      // Thẻ "Xong" và thẻ "Nghe thử" trước đây lặp lại cùng bộ nút Mở file —
+      // gây rối. Nay chỉ giòn lại thẻ Nghe thử, thẻ này chỉ báo đã xong.
       const box = $('#dubResult');
       box.hidden = false;
-      box.innerHTML = `
-        <h3>✅ Xong</h3>
-        <p class="hint">${escapeHtml(
-          `${r.summary.sped}/${r.summary.total} đoạn được tua nhẹ (tối đa ${r.summary.maxSpeed}x), ` +
-            `đoạn trôi nhiều nhất ${r.summary.maxDrift}s.`
-        )}</p>
-        <div class="row wrap">
-          <button class="btn tiny" data-dopen="${escapeAttr(r.wav)}">Mở file .wav</button>
-          ${r.mp3 ? `<button class="btn tiny" data-dopen="${escapeAttr(r.mp3)}">Mở file .mp3</button>` : ''}
-          <button class="btn tiny" data-dopen="${escapeAttr(r.srt)}">Mở .srt</button>
-        </div>`;
+      box.innerHTML = `<p class="hint" style="margin:0">✅ Đã xong — nghe thử bên dưới.</p>`;
       showDubResult(r);
       toast('Đã tạo xong file giọng đọc.', 'ok');
     } catch (err) {

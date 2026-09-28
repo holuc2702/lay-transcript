@@ -81,6 +81,7 @@ contextBridge.exposeInMainWorld('api', {
     align: (text, segs) => call('dubbing:align', text, segs),
     translateAll: (segments) => call('dubbing:translateAll', segments),
     reveal: (file) => call('dubbing:reveal', file),
+    registerMedia: (files) => call('media:register', files),
     readFile: (file) => call('dubbing:readFile', file),
     onProgress: (cb) => subscribe('dubbing:progress', cb),
   },

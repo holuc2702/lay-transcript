@@ -1,8 +1,9 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, shell, dialog, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, Menu, protocol, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { pathToFileURL } = require('url');
 
 const C = require('./config');
 const paths = require('./paths');
@@ -41,7 +42,23 @@ let ytdlpVersion = null;
  *
  * Phải gọi TRƯỚC khi app sẵn sàng, và trước khi bất kỳ thứ gì đọc userData.
  */
+// Đăng ký protocol ltmedia:// để phát file âm thanh trong app.
+//
+// Vì sao không dùng file:// trực tiếp:
+//   1. CSP của app đang đặt `default-src 'none'` -> trình duyệt chặn media.
+//   2. Ngay cả khi mở khoá CSP, tải file:// từ trang file:// vẫn bị CORS chặn
+//      trong Electron, nên player hiện "0:00 / 0:00" và không phát được.
+// Protocol riêng đi qua net.fetch của Electron nên không dính hai lỗi trên.
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'ltmedia', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
+]);
+
 const DATA_DIR_NAME = 'LayTranscript';
+
+// Bảng tra cứu file media cho protocol ltmedia:// (khai báo ở scope module vì
+// cả handler protocol lẫn IPC đều dùng).
+const mediaFiles = new Map();
+let mediaSeq = 0;
 try {
   app.setPath('userData', path.join(app.getPath('appData'), DATA_DIR_NAME));
 } catch (err) {
@@ -192,6 +209,17 @@ function buildMenu() {
 // ---------------------------------------------------------------------------
 
 app.whenReady().then(async () => {
+  protocol.handle('ltmedia', async (request) => {
+    try {
+      const id = new URL(request.url).host;
+      const file = mediaFiles.get(id);
+      if (!file || !fs.existsSync(file)) return new Response('Not found', { status: 404 });
+      return net.fetch(pathToFileURL(file).toString());
+    } catch {
+      return new Response('Error', { status: 500 });
+    }
+  });
+
   buildMenu();
   createWindow();
 
@@ -657,6 +685,18 @@ handle('dubbing:translateAll', async (segments) => {
   return out;
 });
 
+/** Đăng ký file âm thanh để renderer phát được, trả về URL ltmedia://… */
+handle('media:register', (files) => {
+  const out = {};
+  for (const [key, file] of Object.entries(files || {})) {
+    if (!file || !fs.existsSync(file)) continue;
+    const id = `${(++mediaSeq).toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+    mediaFiles.set(id, file);
+    out[key] = `ltmedia://${id}`;
+  }
+  return out;
+});
+
 /** Mở thư mục chứa file vừa ghép. */
 handle('dubbing:reveal', (file) => {
   if (!file) return false;
@@ -687,7 +727,22 @@ handle('dubbing:run', async (payload) => {
     throw new Error('Tính năng lồng tiếng hiện chỉ dành cho macOS.');
   }
 
-  const jobDir = paths.writableDir('dubbing', Date.now().toString(36));
+  // Thư mục lưu voice, đặt theo tên video để sau này dễ tìm lại và không phải
+  // tạo voice từ đầu. Tên thư mục kèm thời lượng để dễ đoán.
+  const safeName = (n) =>
+    String(n || '')
+      .replace(/[<>:"/\\|?*\x00-\x1f]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 90) || 'video';
+  const totalSec = Math.round(
+    segments.reduce((a, x) => a + Math.max(0, (Number(x.end) || 0) - (Number(x.start) || 0)), 0)
+  );
+  const mins = Math.round(totalSec / 60);
+  const jobDir = paths.writableDir(
+    'dubbing-voice',
+    `${safeName(payload.voiceDirName || '')}_${mins}ph`
+  );
   const outDir = voiceDir || paths.writableDir('dubbing-out');
   const ffmpegPath = jobsLib.ffmpegPath();
   const log = (message) => broadcast('dubbing:progress', { message });
@@ -737,20 +792,41 @@ handle('dubbing:run', async (payload) => {
       log(`  đoạn ${i + 1} tạo voice lỗi: ${err.message}`);
       continue;
     }
-    // Bắt buộc phải mang theo start/end của đoạn trong script.
+    // ĐO LẠI bằng ffprobe, không tin giá trị API trả về.
     //
-    // THIẾU HAI TRƯỜNG NÀY THÌ BỘ CĂN KHÔNG BIẾT CÁCH ĐẶT KHUNG: mọi đoạn
-    // thành [0, 0] -> khung chỉ dài 0.2s -> xếp từ giây 0 liền nhau, không
-    // có khoảng nghỉ nào, và tổng thời lượng rút xuống bằng tổng độ dài lời
-    // (video 17 phút ra audio 8 phút). Đây đúng là lỗi "đọc liên tục, không
-    // khớp script".
+    // Đây là nguyên nhân làm ÂM THANH BỊ ĐÈ NHAU: nếu ffprobe hỏng thì
+    // duration = null. Trước đây null biến thành 0, bộ căn cho mỗi đoạn khung
+    // 0.05 giây, nhưng file mp3 thực tế dài 3-6 giây -> các file chồng lên
+    // nhau khi trộn. Nay: đo lại chính file, đo hỏng thì BỎ QUA đoạn đó
+    // (mất một câu còn hơn nghe chồng tiếng).
+    const realDur = await tts.probeDuration(v.file, ffmpegPath).catch(() => null);
+    if (!realDur || !isFinite(realDur) || realDur <= 0) {
+      log(`  đoạn ${i + 1}: không đo được thời lượng, bỏ qua đoạn này.`);
+      continue;
+    }
     parts.push({
       i,
       file: v.file,
-      duration: v.duration ?? 0,
+      duration: realDur,
       start: Number(segments[i].start) || 0,
       end: Number(segments[i].end) || Number(segments[i].start) || 0,
     });
+
+    // Đặt lại tên file cho dễ nhìn: 01_00m12s_Mot-Trong-video.mp3
+    const st = Number(segments[i].start) || 0;
+    const mm = String(Math.floor(st / 60)).padStart(2, '0');
+    const ss = String(Math.floor(st % 60)).padStart(2, '0');
+    const head = safeName(texts[i] || '').slice(0, 34).replace(/[.,;!?]+$/, '');
+    const nice = path.join(
+      jobDir,
+      `${String(i + 1).padStart(3, '0')}_${mm}m${ss}s_${head || 'doan'}.mp3`
+    );
+    try {
+      fs.copyFileSync(v.file, nice);
+      parts[parts.length - 1].saved = nice;
+    } catch {
+      /* không copy được thì vẫn ghép bình thường */
+    }
     made++;
   }
   if (!parts.length) throw new Error('Không tạo được file voice nào.');
@@ -775,7 +851,11 @@ handle('dubbing:run', async (payload) => {
     }),
     wav,
     ffmpegPath,
-    { workDir: jobDir, onProgress: ({ message }) => log(message) }
+    {
+      workDir: jobDir,
+      onProgress: ({ message }) => log(message),
+      probeDuration: (f) => tts.probeDuration(f, ffmpegPath),
+    }
   );
   log('Đang xuất mp3…');
   await dubbing.toMp3(wav, mp3, ffmpegPath).catch(() => null);
@@ -797,7 +877,14 @@ handle('dubbing:run', async (payload) => {
     .join('\n');
   fs.writeFileSync(srtFile, srt, 'utf8');
 
-  return { wav, mp3: fs.existsSync(mp3) ? mp3 : null, srt: srtFile, summary: sum };
+  return {
+    wav,
+    mp3: fs.existsSync(mp3) ? mp3 : null,
+    srt: srtFile,
+    voiceDir: jobDir,
+    voices: parts.filter((p) => p.saved).map((p) => p.saved),
+    summary: sum,
+  };
 });
 
 handle('history:list', () => history.list());
