@@ -885,7 +885,7 @@ handle('dubbing:run', async (payload) => {
     wav,
     mp3: fs.existsSync(mp3) ? mp3 : null,
     srt: srtFile,
-    voiceDir: jobDir,
+    voiceDir: keepDir,
     voices: parts.filter((p) => p.saved).map((p) => p.saved),
     summary: sum,
   };

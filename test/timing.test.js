@@ -64,33 +64,105 @@ test('bộ căn không bao giờ tua vượt 1.15x và không chồng lấn', ()
   assert.equal(T.summarize(f).overlapped, 0);
 });
 
-test('bản dịch ngắn hơn nhiều vẫn trải đều khắp video', () => {
-  // 39 đoạn gốc trong 17 phút, bản dịch chỉ 10 câu
+test('bản dịch ít câu vẫn phủ hết video, không dồn cục ở đầu', () => {
+  // 39 đoạn gốc trong ~19 phút, bản dịch chỉ 10 câu.
+  // Kịch bản xấu trước đây: 10 câu dồn hết vào 87 giây đầu, phần còn lại im lặng.
   const orig = Array.from({ length: 39 }, (_, i) => ({ start: i * 26.7, end: i * 26.7 + 24 }));
+  const T0 = orig[0].start;
   const tend = orig[orig.length - 1].end;
   const al = A.alignTranslation(
     Array.from({ length: 10 }, (_, i) => `Câu ${i + 1}.`).join('\n'),
     orig
   );
-  assert.equal(al.length, 10);
-  const covered = al[al.length - 1].end / tend;
-  assert.ok(covered > 0.7, `phải phủ >70% video, thực tế ${(covered * 100).toFixed(0)}%`);
-  // Và khi đưa qua bộ căn, khoảng nghỉ vẫn còn
-  const f = T.fitSegments(al.map((x) => ({ start: x.start, end: x.end, duration: 6 })));
-  for (let i = 1; i < f.length; i++) {
-    assert.ok(f[i].start - f[i - 1].end > 5, 'phải giữ khoảng nghỉ lớn giữa các câu');
-  }
+  assert.equal(al.length, 10, 'không được mất câu');
+  const covered = (al[al.length - 1].end - T0) / (tend - T0);
+  assert.ok(covered > 0.9, `phải phủ >90% video, thực tế ${(covered * 100).toFixed(0)}%`);
+  // Câu cuối phải nằm gần cuối video, không bị bỏ trống.
+  assert.ok(tend - al[al.length - 1].end < 120, 'phần cuối video bị bỏ trống quá lâu');
 });
 
-test('số câu dịch khớp số đoạn gốc thì neo đúng từng câu', () => {
+test('số câu khớp số đoạn gốc thì câu i nằm gần đoạn i', () => {
   const orig = [
     { start: 0, end: 4 },
     { start: 5, end: 9 },
     { start: 10, end: 14 },
   ];
+  // Ba câu "Một/Hai/Ba." chỉ khoảng 0.6s mỗi câu, tổng 1.8s cho video 14s —
+  // không thể vừa bám sát từng đoạn gốc vừa phủ hết video. Đây là đánh đổi
+  // có ý thức: căn theo đầu/cuối, chấp nhận lệch ở giữa.
   const al = A.alignTranslation('Một. Hai. Ba.', orig);
   assert.equal(al.length, 3);
-  assert.ok(al[0].start < 1.5, `câu 1 phải ở đoạn 1, thực tế ${al[0].start}`);
-  assert.ok(al[1].start >= 4.5 && al[1].start < 9.5, `câu 2 phải ở đoạn 2, thực tế ${al[1].start}`);
-  assert.ok(al[2].start >= 9.5, `câu 3 phải ở đoạn 3, thực tế ${al[2].start}`);
+  // Đầu và cuối phải khớp (đây là điều người dùng yêu cầu).
+  assert.ok(Math.abs(al[0].start - 0) < 0.2, `câu 1 phải bám đầu video, lệch ${al[0].start.toFixed(2)}s`);
+  assert.ok(Math.abs(al[2].end - 14) < 0.2, `câu 3 phải kết thúc ở cuối video, lệch ${(al[2].end - 14).toFixed(2)}s`);
+  // Câu ở giữa nằm giữa, không chồng câu nào.
+  assert.ok(al[1].start >= al[0].end, 'câu 2 phải sau câu 1');
+  assert.ok(al[1].end <= al[2].start, 'câu 2 phải trước câu 3');
+  assert.ok(al[1].start > 1 && al[1].start < 13, 'câu 2 phải ở khoảng giữa');
+});
+
+// ---------------------------------------------------------------------------
+// Hồi quy: "bị cắt mất mấy câu" và "tiếng Việt hết sớm trong khi audio gốc còn nói".
+// ---------------------------------------------------------------------------
+
+const segs39 = Array.from({ length: 39 }, (_, i) => ({ start: i * 30, end: i * 30 + 28 }));
+
+function countUnits(text) {
+  return text.split('\n').filter((x) => x.trim()).length;
+}
+
+test('căn KHÔNG BAO GIỜ bỏ mất câu nào', () => {
+  for (const n of [3, 13, 30, 39, 60, 80]) {
+    const units = Array.from({ length: n }, (_, i) => `Câu ${i}.`).join('\n');
+    const r = A.alignTranslation(units, segs39);
+    assert.equal(r.length, countUnits(units), `${n} câu vào phải ra ${n} câu`);
+  }
+});
+
+test('căn phủ hết video, không hết sớm ở giữa', () => {
+  for (const n of [13, 30, 39, 60]) {
+    const units = Array.from({ length: n }, (_, i) => `Câu ${i}.`).join('\n');
+    const r = A.alignTranslation(units, segs39);
+    const T0 = segs39[0].start;
+    const T1 = segs39[38].end;
+    const covered = (r[r.length - 1].end - T0) / (T1 - T0);
+    assert.ok(
+      covered > 0.95,
+      `${n} câu chỉ phủ ${(covered * 100).toFixed(0)}% video — tiếng Việt hết sớm`
+    );
+  }
+});
+
+test('căn không chồng lấn và không có khoảng lặng quá dài khi số câu tương đương', () => {
+  // 39 câu, mỗi câu 25s, video dài ~1170s -> khoảng lặng hợp lý
+  const units = Array.from({ length: 39 }, (_, i) => `Câu ${i}`).join('\n');
+  const durs = Array.from({ length: 39 }, () => 25);
+  const r = A.alignTranslation(units, segs39, durs);
+  for (let i = 1; i < r.length; i++) {
+    assert.ok(r[i].start >= r[i - 1].end - 1e-6, `câu ${i} chồng câu ${i - 1}`);
+  }
+  const gaps = [];
+  for (let i = 1; i < r.length; i++) gaps.push(r[i].start - r[i - 1].end);
+  const maxGap = Math.max(...gaps);
+  assert.ok(maxGap < 8, `khoảng lặng giữa các câu quá dài: ${maxGap.toFixed(1)}s`);
+});
+
+test('bản dịch dài hơn bản gốc thì KHÔNG bị cắt, chấp nhận dài hơn video', () => {
+  const units = Array.from({ length: 80 }, (_, i) => `Câu ${i}`).join('\n');
+  const durs = Array.from({ length: 80 }, () => 20); // 1600s > 1170s của video
+  const r = A.alignTranslation(units, segs39, durs);
+  assert.equal(r.length, 80, 'phải giữ đủ 80 câu');
+  const T1 = segs39[38].end;
+  assert.ok(
+    r[r.length - 1].end > T1 * 0.9,
+    'khi bản dịch dài hơn thì nên tràn ra sau, không cắt mất câu nào'
+  );
+});
+
+test('tua nhanh không vượt quá 1.15x', () => {
+  const units = Array.from({ length: 39 }, (_, i) => `Câu ${i}`).join('\n');
+  const durs = Array.from({ length: 39 }, () => 40); // 1560s > 1170s -> cần tua
+  const r = A.alignTranslation(units, segs39, durs);
+  const maxSpeed = durs[0] / (r[0].end - r[0].start);
+  assert.ok(maxSpeed <= 1.1501, `tua ${maxSpeed.toFixed(3)}x, vượt giới hạn 1.15x`);
 });
