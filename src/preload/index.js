@@ -80,11 +80,18 @@ contextBridge.exposeInMainWorld('api', {
     analyzeSource: (file, opts) => call('dubbing:analyzeSource', file, opts),
     align: (text, segs) => call('dubbing:align', text, segs),
     resegment: (text, segs) => call('dubbing:resegment', text, segs),
+    refine: (planned, durs, segs) => call('dubbing:refine', planned, durs, segs),
     translateAll: (segments, providerIds) => call('dubbing:translateAll', segments, providerIds),
     reveal: (file) => call('dubbing:reveal', file),
     registerMedia: (files) => call('media:register', files),
     readFile: (file) => call('dubbing:readFile', file),
     onProgress: (cb) => subscribe('dubbing:progress', cb),
+    history: {
+      list: () => call('dubhistory:list'),
+      remove: (dir) => call('dubhistory:remove', dir),
+      clear: () => call('dubhistory:clear'),
+      onChanged: (cb) => subscribe('dubhistory:changed', cb),
+    },
   },
   history: {
     list: () => call('history:list'),

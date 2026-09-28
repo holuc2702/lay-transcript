@@ -21,6 +21,8 @@ const timing = require('./timing');
 const dubbing = require('./dubbing');
 const align = require('./align');
 const resegment = require('./resegment');
+const dubHistory = require('./dubhistory');
+const syncfit = require('./syncfit');
 
 const isDev = !app.isPackaged;
 
@@ -651,10 +653,31 @@ handle('dubbing:analyzeSource', async (filePath, opts) => {
   };
 });
 
-/** Căn bản dịch (chưa có số phút) vào khung thời gian của bản gốc. */
-handle('dubbing:align', (translatedText, originalSegments) =>
-  align.alignTranslation(translatedText, originalSegments)
-);
+/** Căn bản dịch vào khung thời gian của bản gốc (Bước 4). */
+handle('dubbing:align', (translatedText, originalSegments) => {
+  const lines = String(translatedText || '')
+    .split('\n')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  // Giữ nguyên dấu '--' mà người dùng tự gõ: tách theo nó, đừng tách theo nhịp.
+  const units = String(translatedText || '').includes('--')
+    ? String(translatedText).split('--').map((s) => s.trim()).filter(Boolean)
+    : lines;
+  const planned = syncfit.alignToSegments(units, originalSegments, null);
+  const report = syncfit.alignmentReport(planned, originalSegments);
+  return {
+    segments: planned,
+    report,
+    // Cùng hình thức với alignTranslation cũ để renderer không phải đổi nhiều.
+    text: planned.map((p) => p.text).join('\n'),
+  };
+});
+
+/** Đo lại bằng thời lượng THẬT của file voice, sau khi tạo xong. */
+handle('dubbing:refine', (planned, realDurations, originalSegments) => {
+  const out = syncfit.refineWithRealDurations(planned, realDurations, originalSegments);
+  return { segments: out, report: syncfit.alignmentReport(out, originalSegments) };
+});
 
 /**
  * Dịch toàn bộ các đoạn, để người dùng XEM LẠI và sửa trước khi tạo voice.
@@ -713,6 +736,11 @@ handle('dubbing:reveal', (file) => {
   shell.showItemInFolder(file);
   return true;
 });
+
+/** Lịch sử lồng tiếng. */
+handle('dubhistory:list', () => dubHistory.list());
+handle('dubhistory:remove', (dir) => dubHistory.remove(dir));
+handle('dubhistory:clear', () => dubHistory.clear());
 
 /** Tự tách câu bản dịch theo nhịp câu của bản gốc. */
 handle('dubbing:resegment', (translatedText, originalSegments) => {
@@ -826,6 +854,8 @@ handle('dubbing:run', async (payload) => {
     }
     parts.push({
       i,
+      idx: i,
+      plan: (payload.plan || [])[i] || null,
       file: v.file,
       duration: realDur,
       start: Number(segments[i].start) || 0,
@@ -851,12 +881,40 @@ handle('dubbing:run', async (payload) => {
   }
   if (!parts.length) throw new Error('Không tạo được file voice nào.');
 
-  // ---- 3. Căn timing ----
-  const fitted = timing.fitSegments(parts);
+  // ---- 3. Căn timing bằng THỜI LƯỢNG THẬT ----
+  //
+  // Ở Bước 4 mới chỉ ước lượng độ dài. Tới đây đã có file mp3 thật nên đo lại
+  // chính xác — đây mới là bước quyết định độ khớp có đạt 95% hay không.
+  const durs = parts.map((p) => p.duration);
+  let fitted = null;
+  let report = null;
+  const planned = segments.filter((x) => String(x.text || '').trim());
+
+  if (planned.length === parts.length && parts.every((p) => typeof p.idx === 'number')) {
+    // Có kế hoạch căn sẵn ở Bước 4 -> đo lại theo thời lượng thật.
+    const plan = parts.map((p) => p.plan).filter(Boolean);
+    if (plan.length === parts.length) {
+      const refined = syncfit.refineWithRealDurations(plan, durs, planned);
+      fitted = refined;
+      report = syncfit.alignmentReport(refined, planned);
+    }
+  }
+  if (!fitted) {
+    // Dự phòng: không có kế hoạch (người dùng bỏ qua Bước 4) -> căn theo vị trí
+    // gốc của từng đoạn.
+    const fallbackPlan = syncfit.alignToSegments(
+      parts.map((p) => texts[p.idx] || ''),
+      planned,
+      null
+    );
+    fitted = syncfit.refineWithRealDurations(fallbackPlan, durs, planned);
+    report = syncfit.alignmentReport(fitted, planned);
+  }
   const sum = timing.summarize(fitted);
   log(
     `Đã tạo ${made}/${want} đoạn voice. ` +
-      `Tua nhẹ ${sum.sped} đoạn (tối đa ${sum.maxSpeed}x), trôi tối đa ${sum.maxDrift}s.`
+      `Khớp timing: ${report.percent}% câu đúng khung gốc (lệch tối đa ${report.maxDrift}s), ` +
+      `tua nhẹ ${sum.sped}/${sum.total} đoạn.`
   );
 
   // ---- 4. Ghép ----
@@ -901,6 +959,26 @@ handle('dubbing:run', async (payload) => {
     .map((f, k) => `${k + 1}\n${fmt(f.start)} --> ${fmt(f.end)}\n${texts[f.index] || ''}\n`)
     .join('\n');
   fs.writeFileSync(srtFile, srt, 'utf8');
+
+  // Ghi lịch sử để sau này tìm lại được. Không ghi được thì không làm hỏng
+  // kết quả đã tạo.
+  try {
+    dubHistory.add({
+      dir: videoDir,
+      name: base,
+      title: payload.voiceDirName || base,
+      voice: voice,
+      translator: payload.translator || '',
+      segmentCount: parts.length,
+      duration: timing.totalDuration(fitted),
+      files: { wav, mp3: fs.existsSync(mp3) ? mp3 : null, srt: srtFile },
+      voiceDir: keepDir,
+      voiceCount: parts.filter((p) => p.saved).length,
+    });
+  } catch (err) {
+    process.stderr.write(`[dubbing] không ghi lịch sử: ${err.message}\n`);
+  }
+  broadcast('dubhistory:changed', dubHistory.list());
 
   return {
     dir: videoDir,

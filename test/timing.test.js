@@ -5,6 +5,14 @@ const assert = require('node:assert');
 
 const T = require('../src/main/timing');
 const A = require('../src/main/align');
+const SF = require('../src/main/syncfit');
+const RS = require('../src/main/resegment');
+// 13 đoạn gốc, mỗi đoạn 20 giây — dùng cho test căn 1-1
+const segs13 = Array.from({ length: 13 }, (_, i) => ({
+  start: i * 20,
+  end: i * 20 + 18,
+  text: `gốc ${i}`,
+}));
 
 /**
  * Hồi quy cho lỗi "đọc liên tục, không khớp script".
@@ -171,8 +179,6 @@ test('tua nhanh không vượt quá 1.15x', () => {
 // Tự tách câu theo nhịp bản gốc.
 // ---------------------------------------------------------------------------
 
-const RS = require('../src/main/resegment');
-
 test('tự tách câu khi bản dịch bị gom thành một khối', () => {
   const orig = [
     { text: 'The library closes at six. Students must return books.' },
@@ -224,4 +230,92 @@ test('tách câu nhận ra tiếng Anh và tiếng Trung', () => {
   assert.ok(en[0].endsWith('.'));
   const zh = RS.splitSentences('今天天气很好。我们去公园吧！好吗？');
   assert.equal(zh.length, 3, `tiếng Trung phải tách được 3 câu, thực tế ${zh.length}`);
+});
+
+// ---------------------------------------------------------------------------
+// Căn chính xác 1-1: câu dịch thứ i vào đúng khung đoạn gốc thứ i.
+// ---------------------------------------------------------------------------
+
+test('số câu = số đoạn: câu i nằm ĐÚNG đầu đoạn i, khớp 100%', () => {
+  const lines = Array.from({ length: 13 }, (_, i) => `Câu dịch ${i}`);
+  const plan = SF.alignToSegments(lines, segs13, null);
+  assert.equal(plan.length, 13);
+  for (let i = 0; i < 13; i++) {
+    assert.equal(plan[i].segIndex, i, `câu ${i} phải gắn với đoạn ${i}`);
+    assert.ok(
+      Math.abs(plan[i].start - segs13[i].start) < 0.05,
+      `câu ${i} lệch ${(plan[i].start - segs13[i].start).toFixed(2)}s`
+    );
+  }
+  const rep = SF.alignmentReport(plan, segs13);
+  assert.equal(rep.percent, 100, `khớp ${rep.percent}%`);
+  assert.ok(rep.maxDrift < 0.05, `lệch tối đa ${rep.maxDrift}s`);
+});
+
+// Bản dịch tiếng Việt dài hơn bản gốc `ratio` lần vẫn phải khớp 100%:
+// câu i vẫn nằm đúng đầu đoạn i, và không câu nào chồng nhau.
+function assertRatio(ratio) {
+  const plan = SF.alignToSegments(Array.from({ length: 13 }, () => 'Câu dịch'), segs13, null);
+  const durs = Array.from({ length: 13 }, () => 18 * ratio);
+  const ref = SF.refineWithRealDurations(plan, durs, segs13);
+  const rep = SF.alignmentReport(ref, segs13);
+  assert.equal(rep.percent, 100, `tỉ lệ ${ratio}: khớp ${rep.percent}%`);
+  for (let i = 1; i < ref.length; i++) {
+    assert.ok(
+      ref[i].start >= ref[i - 1].end - 1e-6,
+      `tỉ lệ ${ratio}: câu ${i} chồng câu ${i - 1}`
+    );
+  }
+}
+
+test('tiếng Việt dài hơn 10%', () => {
+  const plan = SF.alignToSegments(Array.from({ length: 13 }, () => 'C'), segs13, null);
+  const ref = SF.refineWithRealDurations(plan, Array.from({ length: 13 }, () => 19.8), segs13);
+  assert.equal(SF.alignmentReport(ref, segs13).percent, 100);
+});
+
+test('tiếng Việt dài hơn 25%', () => {
+  const plan = SF.alignToSegments(Array.from({ length: 13 }, () => 'C'), segs13, null);
+  const ref = SF.refineWithRealDurations(plan, Array.from({ length: 13 }, () => 22.5), segs13);
+  const rep = SF.alignmentReport(ref, segs13);
+  assert.equal(rep.percent, 100, `khớp ${rep.percent}%`);
+  for (let i = 1; i < ref.length; i++) {
+    assert.ok(ref[i].start >= ref[i - 1].end - 1e-6, `câu ${i} chồng câu ${i - 1}`);
+  }
+});
+
+test('tiếng Việt dài hơn 30%', () => {
+  const plan = SF.alignToSegments(Array.from({ length: 13 }, () => 'C'), segs13, null);
+  const ref = SF.refineWithRealDurations(plan, Array.from({ length: 13 }, () => 23.4), segs13);
+  assert.equal(SF.alignmentReport(ref, segs13).percent, 100);
+});
+
+test('độ lệch KHÔNG cộng dồn khi bị dồn', () => {
+  // Sai lớn nhất trước đây: mỗi câu tự tua riêng, độ lệch cộng dồn thành
+  // hàng chục giây ở cuối. Hệ số chung phải giữ sai số không tích luỹ.
+  const plan = SF.alignToSegments(Array.from({ length: 13 }, () => 'x'), segs13, null);
+  const durs = Array.from({ length: 13 }, () => 18 * 1.3);
+  const ref = SF.refineWithRealDurations(plan, durs, segs13);
+  // Độ trôi chỉ được do tua tối đa, không được lớn dần.
+  const spread = ref[ref.length - 1].end - ref[ref.length - 1].start;
+  assert.ok(spread > 0);
+  const rep = SF.alignmentReport(ref, segs13);
+  assert.equal(rep.percent, 100, `khớp ${rep.percent}%`);
+});
+
+test('bản dịch quá dài thì báo người dùng cần rút gọn', () => {
+  const plan = SF.alignToSegments(Array.from({ length: 13 }, () => 'x'), segs13, null);
+  const durs = Array.from({ length: 13 }, () => 18 * 2);
+  const ref = SF.refineWithRealDurations(plan, durs, segs13);
+  const rep = SF.alignmentReport(ref, segs13);
+  assert.ok(rep.shortenBy > 1, 'phải báo tỉ lệ cần rút gọn');
+});
+
+test('không được bỏ mất câu nào', () => {
+  const plan = SF.alignToSegments(
+    Array.from({ length: 9 }, (_, i) => `Câu ${i}`),
+    segs13,
+    null
+  );
+  assert.equal(plan.length, 9);
 });

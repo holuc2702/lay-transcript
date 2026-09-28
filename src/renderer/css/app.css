@@ -1242,3 +1242,52 @@ details p {
     animation: none;
   }
 }
+
+/* ---------------- Lịch sử lồng tiếng ---------------- */
+
+.dub-hist-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dub-hist {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 11px 13px;
+}
+
+.dub-hist.missing {
+  opacity: 0.55;
+}
+
+.dub-hist-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.dub-hist-name {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dub-hist-meta {
+  font-size: 11.5px;
+  color: var(--text-faint);
+  margin-top: 2px;
+}
+
+.dub-hist-actions {
+  display: flex;
+  gap: 6px;
+  flex: none;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
