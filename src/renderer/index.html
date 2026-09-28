@@ -21,6 +21,7 @@
       <nav class="tabs" role="tablist">
         <button class="tab active" data-tab="transcribe" role="tab">Tạo transcript</button>
         <button class="tab" data-tab="history" role="tab">Lịch sử</button>
+        <button class="tab" data-tab="dubbing" role="tab">Lồng tiếng</button>
         <button class="tab" data-tab="settings" role="tab">Cài đặt</button>
         <button class="tab" data-tab="help" role="tab">Trợ giúp</button>
       </nav>
@@ -87,6 +88,82 @@
           <div class="empty-icon">🗂</div>
           <h2>Chưa có lịch sử</h2>
           <p>Các video bạn xử lý sẽ được lưu lại ở đây và không mất khi đóng app.</p>
+        </div>
+      </section>
+
+      <!-- ============ TAB: LỒNG TIẾNG ============ -->
+      <section class="panel" data-panel="dubbing">
+        <div class="card" id="dubUnsupported" hidden>
+          <h3>Chỉ hỗ trợ trên macOS</h3>
+          <p class="hint">
+            Tính năng lồng tiếng hiện mới chạy trên macOS (dùng ffmpeg và
+            sidecar của app). Trên Windows sẽ báo chưa hỗ trợ.
+          </p>
+        </div>
+
+        <div id="dubMac">
+          <div class="card">
+            <h3>Bước 1 — Đăng nhập 3A</h3>
+            <p class="hint">
+              App gọi trực tiếp API của 3aproduction.io.vn (giống hệt thao tác
+              bạn làm trên web). Đăng nhập một lần, phiên được lưu lại.
+            </p>
+            <div class="row">
+              <input type="password" id="ttsPassword" placeholder="Mật khẩu 3A" autocomplete="off" />
+              <button class="btn" id="btnTtsLogin">Đăng nhập</button>
+              <button class="btn ghost" id="btnTtsLogout" hidden>Đăng xuất</button>
+            </div>
+            <p class="hint" id="ttsStatus">Chưa đăng nhập.</p>
+          </div>
+
+          <div class="card">
+            <h3>Bước 2 — Chọn giọng</h3>
+            <div class="field">
+              <label class="field-label" for="dubVoice">Giọng đọc</label>
+              <select id="dubVoice">
+                <option value="HOÀNG">HOÀNG</option>
+                <option value="LÊ MINH">LÊ MINH</option>
+              </select>
+              <p class="hint">
+                Giọng lấy đúng danh sách trên trang 3A. Muốn thêm giọng khác thì
+                thêm vào danh sách đó rồi báo tôi để cập nhật.
+              </p>
+            </div>
+            <div class="field">
+              <label class="field-label" for="dubOutName">Tên file khi xuất</label>
+              <input type="text" id="dubOutName" value="lồng-tiếng" />
+              <p class="hint">
+                File chỉ gồm giọng đọc (không có tiếng gốc của video), kèm một
+                file <code>.srt</code> bản dịch để bạn đối chiếu.
+              </p>
+            </div>
+            <div class="field">
+              <label class="checkbox">
+                <input type="checkbox" id="dubTranslate" checked />
+                <span>Dịch sang tiếng Việt trước khi tạo voice</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3>Bước 3 — Chọn video trong lịch sử</h3>
+            <div id="dubHistoryList" class="dub-pick-list"></div>
+            <p class="hint" id="dubPickHint">
+              Mở tab <strong>Lịch sử</strong>, bấm <strong>Xem</strong> ở một video rồi
+              quay lại đây, hoặc chọn từ danh sách bên trên.
+            </p>
+          </div>
+
+          <div class="card">
+            <h3>Bước 4 — Tạo giọng đọc</h3>
+            <div class="row wrap">
+              <button class="btn primary" id="btnDubRun" disabled>Tạo giọng đọc</button>
+              <button class="btn ghost" id="btnDubCancel" hidden>Dừng</button>
+            </div>
+            <p class="hint" id="dubSegmentsInfo">Chưa chọn video nào.</p>
+            <div id="dubLog" class="log-box"></div>
+            <div id="dubResult" class="dub-result" hidden></div>
+          </div>
         </div>
       </section>
 
@@ -222,6 +299,40 @@
             <a class="btn ghost" id="btnReleases" href="#" target="_blank">Trang Releases</a>
           </div>
           <div id="appUpdateLog" class="log-box"></div>
+        </div>
+
+        <div class="card">
+          <h3>Dịch thuật — nhà cung cấp</h3>
+          <p class="hint">
+            Thêm API key của bạn để dịch chất lượng cao hơn. Mỗi dòng là một key;
+            khi một key hết hạn mức, app tự chuyển sang key tiếp theo.
+          </p>
+          <div id="providerList" class="provider-list"></div>
+          <div class="field">
+            <label class="field-label" for="providerAddLabel">Tên hiển thị</label>
+            <input type="text" id="providerAddLabel" placeholder="Ví dụ: OpenAI của tôi" />
+          </div>
+          <div class="field">
+            <label class="field-label" for="providerAddKind">Loại</label>
+            <select id="providerAddKind">
+              <option value="openai">OpenAI (cũng dùng cho OpenAI-compatible)</option>
+              <option value="ollama">Ollama</option>
+              <option value="gemini">Google Gemini</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="field-label" for="providerAddUrl">Đường dẫn gốc (base URL)</label>
+            <input type="text" id="providerAddUrl" placeholder="https://api.openai.com/v1" />
+          </div>
+          <div class="field">
+            <label class="field-label" for="providerAddModel">Tên model</label>
+            <input type="text" id="providerAddModel" placeholder="gpt-4o-mini" />
+          </div>
+          <div class="field">
+            <label class="field-label" for="providerAddKeys">API key (mỗi dòng một key)</label>
+            <textarea id="providerAddKeys" rows="3" placeholder="sk-...&#10;sk-..."></textarea>
+          </div>
+          <button class="btn" id="btnProviderAdd">Thêm nhà cung cấp</button>
         </div>
 
         <div class="card">

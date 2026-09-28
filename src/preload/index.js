@@ -60,6 +60,21 @@ contextBridge.exposeInMainWorld('api', {
     save: (payload) => call('transcript:save', payload),
     saveTxt: (payload) => call('transcript:saveTxt', payload),
   },
+  providers: {
+    list: () => call('providers:list'),
+    save: (patch) => call('providers:save', patch),
+    translate: (text, opts) => call('providers:translate', text, opts),
+    test: (id) => call('providers:test', id),
+  },
+  tts: {
+    login: (password) => call('tts:login', password),
+    session: () => call('tts:session'),
+    logout: () => call('tts:logout'),
+  },
+  dubbing: {
+    run: (payload) => call('dubbing:run', payload),
+    onProgress: (cb) => subscribe('dubbing:progress', cb),
+  },
   history: {
     list: () => call('history:list'),
     remove: (id) => call('history:remove', id),

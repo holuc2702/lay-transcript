@@ -14,6 +14,10 @@ const { Pipeline, setHistoryBroadcaster } = require('./pipeline');
 const history = require('./history');
 const translate = require('./translate');
 const updater = require('./updater');
+const providers = require('./providers');
+const tts = require('./tts');
+const timing = require('./timing');
+const dubbing = require('./dubbing');
 
 const isDev = !app.isPackaged;
 
@@ -476,6 +480,166 @@ handle('app:quitAndInstall', () => updater.quitAndInstall());
 handle('app:repoUrl', () => updater.REPO);
 
 // --- Lich su ---
+// --- Dịch thuật: nhiều nhà cung cấp ---
+handle('providers:list', () => providers.listProviders());
+handle('providers:save', (patch) => {
+  const cur = providers.loadUserProviders();
+  cur.providers = cur.providers || {};
+  const { id, keys, model, baseUrl, label, kind, noKey, remove, defaults } = patch || {};
+  if (remove) {
+    delete cur.providers[id];
+  } else if (id) {
+    cur.providers[id] = {
+      ...(cur.providers[id] || {}),
+      keys: providers.normalizeKeys(keys),
+      ...(model ? { model } : {}),
+      ...(baseUrl ? { baseUrl } : {}),
+      ...(label ? { label } : {}),
+      ...(kind ? { kind } : {}),
+      ...(noKey != null ? { noKey: !!noKey } : {}),
+    };
+  }
+  if (defaults) cur.defaults = { ...(cur.defaults || {}), ...defaults };
+  return providers.saveUserProviders(cur);
+});
+handle('providers:translate', (text, opts) => providers.translate(text, opts || {}));
+handle('providers:test', async (id) => {
+  const p = providers.listProviders().find((x) => x.id === id);
+  if (!p) throw new Error('Không tìm thấy nhà cung cấp này.');
+  // Câu thử dùng TIẾNG ANH. Nếu dùng tiếng Việt thì bản dịch trả về y hệt
+  // câu gốc, người dùng nhìn tưởng API chưa chạy. Câu tiếng Anh cho kết quả
+  // khác rõ ràng -> thấy được là kết nối thật sự hoạt động.
+  const probe = 'The connection works. Please reply in Vietnamese.';
+  const r = await providers.translate(probe, { providerIds: [id] });
+  return {
+    ok: true,
+    providerLabel: p.label,
+    model: p.model,
+    sample: r.text,
+    changed: r.text.trim() !== probe,
+  };
+});
+
+// --- Lồng tiếng (TTS + căn timing) ---
+handle('tts:login', (password) => tts.login(password));
+handle('tts:session', () => tts.session());
+handle('tts:logout', () => tts.logout());
+
+/** Dịch -> tạo voice từng đoạn -> căn timing -> ghép thành 1 file. */
+handle('dubbing:run', async (payload) => {
+  const {
+    segments,
+    voice = 'HOÀNG',
+    providerIds = [],
+    outName = 'lồng tiếng',
+    voiceDir,
+    translate = true,
+  } = payload || {};
+  if (!Array.isArray(segments) || !segments.length) throw new Error('Chưa có transcript.');
+  if (process.platform !== 'darwin') {
+    throw new Error('Tính năng lồng tiếng hiện chỉ dành cho macOS.');
+  }
+
+  const jobDir = paths.writableDir('dubbing', Date.now().toString(36));
+  const outDir = voiceDir || paths.writableDir('dubbing-out');
+  const ffmpegPath = jobsLib.ffmpegPath();
+  const log = (message) => broadcast('dubbing:progress', { message });
+
+  // ---- 1. Dịch từng đoạn ----
+  let texts = segments.map((s) => String(s.text || '').trim());
+  if (translate) {
+    log(`Đang dịch ${texts.length} đoạn…`);
+    const done = [];
+    for (let i = 0; i < texts.length; i++) {
+      if (!texts[i]) {
+        done.push('');
+        continue;
+      }
+      try {
+        const r = await providers.translate(texts[i], { providerIds });
+        done.push(r.text);
+      } catch (err) {
+        log(`Đoạn ${i + 1}: dịch lỗi, giữ nguyên tiếng gốc. (${String(err.message).split('\n')[0]})`);
+        done.push(texts[i]);
+      }
+      if ((i + 1) % 5 === 0 || i === texts.length - 1) {
+        log(`  đã dịch ${i + 1}/${texts.length} đoạn`);
+      }
+    }
+    texts = done;
+  }
+
+  // ---- 2. Tạo voice cho từng đoạn có nội dung ----
+  const parts = [];
+  let made = 0;
+  let want = 0;
+  for (let i = 0; i < segments.length; i++) {
+    if ((texts[i] || '').trim()) want++;
+  }
+  for (let i = 0; i < segments.length; i++) {
+    const text = (texts[i] || '').trim();
+    if (!text) continue;
+    let v;
+    try {
+      v = await tts.synthesize(text, voice, {
+        onStatus: (m) => log(`  đoạn ${i + 1}: ${m}`),
+        appDir: jobDir,
+        ffmpegPath,
+      });
+    } catch (err) {
+      log(`  đoạn ${i + 1} tạo voice lỗi: ${err.message}`);
+      continue;
+    }
+    parts.push({ i, file: v.file, duration: v.duration ?? 0 });
+    made++;
+  }
+  if (!parts.length) throw new Error('Không tạo được file voice nào.');
+
+  // ---- 3. Căn timing ----
+  const fitted = timing.fitSegments(parts);
+  const sum = timing.summarize(fitted);
+  log(
+    `Đã tạo ${made}/${want} đoạn voice. ` +
+      `Tua nhẹ ${sum.sped} đoạn (tối đa ${sum.maxSpeed}x), trôi tối đa ${sum.maxDrift}s.`
+  );
+
+  // ---- 4. Ghép ----
+  const base =
+    String(outName).replace(/[<>:"/\|?*\x00-\x1f]/g, ' ').trim() || 'lồng tiếng';
+  const wav = path.join(outDir, `${base}.wav`);
+  const mp3 = path.join(outDir, `${base}.mp3`);
+  await dubbing.merge(
+    fitted.map((f) => {
+      const p = parts.find((x) => x.i === f.index);
+      return { file: p.file, start: f.start, speed: 1, duration: f.end - f.start };
+    }),
+    wav,
+    ffmpegPath,
+    { workDir: jobDir, onProgress: ({ message }) => log(message) }
+  );
+  log('Đang xuất mp3…');
+  await dubbing.toMp3(wav, mp3, ffmpegPath).catch(() => null);
+
+  // ---- 5. SRT bản dịch để đối chiếu ----
+  const srtFile = path.join(outDir, `${base}.srt`);
+  const fmt = (sec) => {
+    const ms = Math.max(0, Math.round(sec * 1000));
+    const h = Math.floor(ms / 3600000);
+    const m = Math.floor((ms % 3600000) / 60000);
+    const s = Math.floor((ms % 60000) / 1000);
+    return (
+      String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':' +
+      String(s).padStart(2, '0') + ',' + String(ms % 1000).padStart(3, '0')
+    );
+  };
+  const srt = fitted
+    .map((f, k) => `${k + 1}\n${fmt(f.start)} --> ${fmt(f.end)}\n${texts[f.index] || ''}\n`)
+    .join('\n');
+  fs.writeFileSync(srtFile, srt, 'utf8');
+
+  return { wav, mp3: fs.existsSync(mp3) ? mp3 : null, srt: srtFile, summary: sum };
+});
+
 handle('history:list', () => history.list());
 handle('history:remove', (id) => history.remove(id));
 handle('history:clear', () => history.clear());

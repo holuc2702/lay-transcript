@@ -125,6 +125,8 @@ async function init() {
       $$('.panel').forEach((p) =>
         p.classList.toggle('active', p.dataset.panel === tab.dataset.tab)
       );
+      if (tab.dataset.tab === 'dubbing') void renderDubHistory();
+      if (tab.dataset.tab === 'settings') void loadProviders();
     });
   });
 
@@ -335,6 +337,8 @@ function wireAllEvents() {
       });
     })
     .catch(() => {});
+
+  wireDubbing();
 
   $('#mailLink')?.addEventListener('click', (e) => {
     e.preventDefault();
@@ -1187,6 +1191,285 @@ async function saveHistoryTxt(id, segments) {
     defaultName: `${stem}.txt`,
   });
   if (saved) toast(`Đã lưu: ${saved.split(/[\\/]/).pop()}`, 'ok');
+}
+
+
+// ---------------------------------------------------------------------------
+// Nhà cung cấp dịch thuật
+// ---------------------------------------------------------------------------
+
+async function loadProviders() {
+  const box = $('#providerList');
+  if (!box) return;
+  let list = [];
+  try {
+    list = await window.api.providers.list();
+  } catch (err) {
+    box.innerHTML = `<p class="hint warn">Không đọc được danh sách: ${escapeHtml(err.message)}</p>`;
+    return;
+  }
+  box.innerHTML = list
+    .map((p) => {
+      const keyCount = p.keys.length;
+      const canTest = p.noKey || keyCount > 0;
+      return `<div class="prov" data-id="${escapeAttr(p.id)}">
+        <div class="prov-head">
+          <div>
+            <b>${escapeHtml(p.label)}</b>
+            <span class="prov-id">${escapeHtml(p.id)}</span>
+          </div>
+          <div class="row">
+            <button class="btn tiny" data-pact="test" ${canTest ? '' : 'disabled'}>Thử</button>
+            ${p.custom ? `<button class="btn tiny ghost" data-pact="remove">Xóa</button>` : ''}
+          </div>
+        </div>
+        ${p.note ? `<div class="prov-note">${escapeHtml(p.note)}</div>` : ''}
+        <div class="field">
+          <label class="field-label">Base URL</label>
+          <input type="text" data-pfield="baseUrl" value="${escapeAttr(p.baseUrl || '')}" />
+        </div>
+        ${
+          p.kind === 'google-translate' || p.kind === 'mymemory'
+            ? ''
+            : `<div class="field"><label class="field-label">Model</label>
+                 <input type="text" data-pfield="model" value="${escapeAttr(p.model || '')}" /></div>`
+        }
+        ${
+          p.noKey
+            ? '<div class="prov-note">Không cần API key.</div>'
+            : `<div class="field">
+                 <label class="field-label">API key — mỗi dòng một key (${keyCount} key)</label>
+                 <textarea rows="3" data-pfield="keys" spellcheck="false" placeholder="sk-...">${escapeHtml(
+                   p.keys.join('\n')
+                 )}</textarea>
+                 <p class="hint">Hết hạn mức key này → app tự xoay sang key kế tiếp.</p>
+               </div>`
+        }
+        <button class="btn tiny" data-pact="save">Lưu</button>
+      </div>`;
+    })
+    .join('');
+
+  box.querySelectorAll('[data-pact]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const prov = btn.closest('.prov');
+      const id = prov.dataset.id;
+      const act = btn.dataset.pact;
+      if (act === 'remove') {
+        await window.api.providers.save({ id, remove: true });
+        toast('Đã xóa.', 'ok');
+        await loadProviders();
+      } else if (act === 'save') {
+        await window.api.providers.save({
+          id,
+          baseUrl: prov.querySelector('[data-pfield="baseUrl"]')?.value,
+          model: prov.querySelector('[data-pfield="model"]')?.value,
+          keys: prov.querySelector('[data-pfield="keys"]')?.value,
+        });
+        toast('Đã lưu.', 'ok');
+        await loadProviders();
+      } else if (act === 'test') {
+        btn.disabled = true;
+        btn.textContent = 'Đang thử…';
+        try {
+          const r = await window.api.providers.test(id);
+          toast(`${r.providerLabel} (${r.model || '—'}): ${r.sample.slice(0, 70)}`, 'ok');
+        } catch (err) {
+          toast(String(err.message).split('\n')[0], 'error');
+        } finally {
+          btn.disabled = false;
+          btn.textContent = 'Thử';
+        }
+      }
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Lồng tiếng
+// ---------------------------------------------------------------------------
+
+const dubState = { segments: [], jobId: null, busy: false };
+
+function dubLog(msg) {
+  const box = $('#dubLog');
+  if (!box) return;
+  const div = document.createElement('div');
+  div.className = 'log-line';
+  div.textContent = msg;
+  box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
+}
+
+async function initDubbing() {
+  const mac = await window.api.app.info().then((i) => i.platform === 'darwin').catch(() => false);
+  if ($('#dubMac')) $('#dubMac').hidden = !mac;
+  if ($('#dubUnsupported')) $('#dubUnsupported').hidden = mac;
+  if (!mac) return;
+
+  try {
+    const s = await window.api.tts.session();
+    const on = s && s.ok;
+    if ($('#ttsStatus')) {
+      $('#ttsStatus').textContent = on
+        ? `Đã đăng nhập${s.nickname ? ' với tên ' + s.nickname : ''}.`
+        : 'Chưa đăng nhập.';
+    }
+    if ($('#btnTtsLogout')) $('#btnTtsLogout').hidden = !on;
+    if ($('#ttsPassword')) $('#ttsPassword').disabled = on;
+  } catch {
+    /* bỏ qua */
+  }
+  await renderDubHistory();
+}
+
+async function renderDubHistory() {
+  const box = $('#dubHistoryList');
+  if (!box) return;
+  await loadHistory();
+  const done = state.history.filter((h) => h.segmentCount > 0);
+  if (!done.length) {
+    box.innerHTML = '<p class="hint">Chưa có video nào đã xong trong lịch sử.</p>';
+    return;
+  }
+  box.innerHTML = done
+    .map(
+      (h) => `<div class="dub-pick" data-id="${escapeAttr(h.id)}">
+        <div>
+          <b>${escapeHtml(h.title || 'Video')}</b>
+          <small>${escapeHtml(h.createdAt ? new Date(h.createdAt).toLocaleString('vi-VN') : '')} · ${h.segmentCount} đoạn</small>
+        </div>
+        <button class="btn tiny" data-dpick="1">Chọn</button>
+      </div>`
+    )
+    .join('');
+  box.querySelectorAll('[data-dpick]').forEach((b) => {
+    b.addEventListener('click', async () => {
+      const id = b.closest('.dub-pick').dataset.id;
+      const info = $('#dubSegmentsInfo');
+      if (info) info.textContent = 'Đang tải transcript…';
+      try {
+        dubState.segments = await window.api.history.segments(id);
+        if (info) {
+          info.textContent =
+            `Đã chọn ${dubState.segments.length} đoạn. ` +
+            `Ước tính ${Math.round(
+              dubState.segments.reduce((a, s) => a + (s.end - s.start), 0)
+            )} giây giọng gốc.`;
+        }
+        const btn = $('#btnDubRun');
+        if (btn) btn.disabled = false;
+        box.querySelectorAll('.dub-pick').forEach((x) => x.classList.remove('sel'));
+        b.closest('.dub-pick').classList.add('sel');
+      } catch (err) {
+        if (info) info.textContent = 'Không tải được: ' + err.message;
+      }
+    });
+  });
+}
+
+function wireDubbing() {
+  const mac = /Mac|iPhone|iPad/i.test(navigator.userAgent) || navigator.platform === 'MacIntel';
+  if ($('#dubUnsupported')) $('#dubUnsupported').hidden = mac;
+  if ($('#dubMac')) $('#dubMac').hidden = !mac;
+  if (!mac) return;
+
+  $('#btnTtsLogin')?.addEventListener('click', async () => {
+    const pw = $('#ttsPassword').value.trim();
+    if (!pw) {
+      toast('Nhập mật khẩu 3A trước.', 'error');
+      return;
+    }
+    const btn = $('#btnTtsLogin');
+    btn.disabled = true;
+    try {
+      await window.api.tts.login(pw);
+      $('#ttsStatus').textContent = 'Đã đăng nhập.';
+      $('#btnTtsLogout').hidden = false;
+      $('#ttsPassword').disabled = true;
+      toast('Đăng nhập thành công.', 'ok');
+    } catch (err) {
+      $('#ttsStatus').textContent = 'Lỗi: ' + err.message;
+      toast(err.message, 'error');
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  $('#btnTtsLogout')?.addEventListener('click', async () => {
+    await window.api.tts.logout();
+    $('#ttsStatus').textContent = 'Chưa đăng nhập.';
+    $('#btnTtsLogout').hidden = true;
+    $('#ttsPassword').disabled = false;
+    $('#ttsPassword').value = '';
+  });
+
+  window.api.dubbing.onProgress(({ message }) => dubLog(message));
+
+  $('#btnDubRun')?.addEventListener('click', async () => {
+    if (!dubState.segments.length) {
+      toast('Chọn video trước đã.', 'error');
+      return;
+    }
+    const btn = $('#btnDubRun');
+    btn.disabled = true;
+    btn.textContent = 'Đang tạo…';
+    $('#dubResult').hidden = true;
+    try {
+      const r = await window.api.dubbing.run({
+        segments: dubState.segments,
+        voice: $('#dubVoice').value,
+        translate: $('#dubTranslate').checked,
+        outName: $('#dubOutName').value,
+      });
+      const box = $('#dubResult');
+      box.hidden = false;
+      box.innerHTML = `
+        <h3>✅ Xong</h3>
+        <p class="hint">${escapeHtml(
+          `${r.summary.sped}/${r.summary.total} đoạn được tua nhẹ (tối đa ${r.summary.maxSpeed}x), ` +
+            `đoạn trôi nhiều nhất ${r.summary.maxDrift}s.`
+        )}</p>
+        <div class="row wrap">
+          <button class="btn tiny" data-dopen="${escapeAttr(r.wav)}">Mở file .wav</button>
+          ${r.mp3 ? `<button class="btn tiny" data-dopen="${escapeAttr(r.mp3)}">Mở file .mp3</button>` : ''}
+          <button class="btn tiny" data-dopen="${escapeAttr(r.srt)}">Mở .srt</button>
+        </div>`;
+      box.querySelectorAll('[data-dopen]').forEach((b) => {
+        b.addEventListener('click', () => window.api.app.openPath(b.dataset.dopen));
+      });
+      toast('Đã tạo xong file giọng đọc.', 'ok');
+    } catch (err) {
+      toast(String(err.message).split('\n')[0], 'error');
+      dubLog('LỖI: ' + err.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Tạo giọng đọc';
+    }
+  });
+
+  $('#btnProviderAdd')?.addEventListener('click', async () => {
+    const label = $('#providerAddLabel').value.trim();
+    const kind = $('#providerAddKind').value;
+    const baseUrl = $('#providerAddUrl').value.trim();
+    const model = $('#providerAddModel').value.trim();
+    const keys = $('#providerAddKeys').value;
+    if (!label || !baseUrl) {
+      toast('Cần ít nhất tên và đường dẫn gốc.', 'error');
+      return;
+    }
+    const id = 'custom-' + Date.now().toString(36);
+    await window.api.providers.save({ id, label, kind, baseUrl, model, keys, custom: true });
+    $('#providerAddLabel').value = '';
+    $('#providerAddUrl').value = '';
+    $('#providerAddModel').value = '';
+    $('#providerAddKeys').value = '';
+    await loadProviders();
+    toast('Đã thêm.', 'ok');
+  });
+
+  void loadProviders();
+  void initDubbing();
 }
 
 // ---------------------------------------------------------------------------

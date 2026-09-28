@@ -971,3 +971,85 @@ details p {
   gap: 8px;
   margin-top: 10px;
 }
+
+/* ---------------- Nhà cung cấp dịch thuật ---------------- */
+
+.provider-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.prov {
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+}
+
+.prov-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.prov-id {
+  font-size: 11px;
+  color: var(--text-faint);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  margin-left: 6px;
+}
+
+.prov-note {
+  font-size: 11.5px;
+  color: var(--text-faint);
+  margin-bottom: 8px;
+}
+
+/* ---------------- Lồng tiếng ---------------- */
+
+.dub-pick-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.dub-pick {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+
+.dub-pick.sel {
+  border-color: var(--accent);
+  background: rgba(79, 140, 255, 0.08);
+}
+
+.dub-pick small {
+  display: block;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.dub-result {
+  margin-top: 14px;
+  padding: 14px;
+  background: rgba(53, 198, 138, 0.07);
+  border: 1px solid rgba(53, 198, 138, 0.3);
+  border-radius: var(--radius-sm);
+}
+
+.dub-result h3 {
+  margin: 0 0 6px;
+  font-size: 13px;
+  color: var(--green);
+}
