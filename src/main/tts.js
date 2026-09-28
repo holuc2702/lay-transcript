@@ -24,6 +24,8 @@ const { URL } = require('url');
  */
 
 const BASE = 'https://3aproduction.io.vn';
+const UA =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36';
 const POLL_MS = 2500;
 const MAX_POLL_MS = 20 * 60 * 1000;
 
@@ -54,7 +56,18 @@ function saveCookies(setCookieHeaders) {
   return pairs.join('; ');
 }
 
-function request(url, { method = 'GET', headers = {}, body = null, timeout = 60_000, raw = false } = {}) {
+/** Số lần chuyển hướng tối đa. */
+const MAX_REDIRECT = 5;
+
+/**
+ * Gọi HTTP có theo redirect.
+ *
+ * Bắt buộc phải có: server trả `audio_url` dạng http:// (không mã hoá), Cloudflare
+ * trả 301 sang https://. Không theo redirect thì tải về đúng trang HTML 301 —
+ * file 534 bytes, nghe như file rác.
+ */
+function request(url, opts = {}, redirectsLeft = MAX_REDIRECT) {
+  const { method = 'GET', headers = {}, body = null, timeout = 60_000, raw = false } = opts;
   return new Promise((resolve, reject) => {
     const https = require('https');
     const http = require('http');
@@ -68,9 +81,25 @@ function request(url, { method = 'GET', headers = {}, body = null, timeout = 60_
     const lib = u.protocol === 'http:' ? http : https;
     const req = lib.request(
       url,
-      { method, headers: { ...headers }, timeout },
+      { method, headers: { 'User-Agent': UA, ...headers }, timeout },
       (res) => {
         if (res.headers['set-cookie']) saveCookies(res.headers['set-cookie']);
+
+        // Theo chuyển hướng (301/302/307/308).
+        if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
+          res.resume(); // bỏ nội dung trang chuyển hướng
+          if (redirectsLeft <= 0) {
+            reject(new Error('quá nhiều lần chuyển hướng'));
+            return;
+          }
+          const next = new URL(res.headers.location, url).toString();
+          request(next, { ...opts, method: res.statusCode === 303 ? 'GET' : method }, redirectsLeft - 1).then(
+            resolve,
+            reject
+          );
+          return;
+        }
+
         if (raw) {
           const chunks = [];
           res.on('data', (c) => chunks.push(c));
@@ -120,16 +149,23 @@ function authHeaders(extra = {}) {
 // Đăng nhập
 // ---------------------------------------------------------------------------
 
+/** Phiên có còn sống không. Server dùng cờ `authenticated` (không phải `ok`). */
+function sessionOk(s) {
+  return !!(s && (s.authenticated === true || s.ok === true));
+}
+
 async function login(password) {
   try {
     await request(`${BASE}/api/login`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'User-Agent': UA },
       body: JSON.stringify({ password }),
     });
     const s = await session();
-    if (s && s.ok) return { ok: true, nickname: s.nickname || null, isAdmin: !!s.isAdmin };
-    // Đăng nhập trả 200 nhưng chưa có phiên -> báo sai mật khẩu
+    if (sessionOk(s)) {
+      return { ok: true, nickname: s.nickname || null, isAdmin: !!s.is_admin };
+    }
+    // Server trả 200 nhưng không cấp phiên -> mật khẩu sai
     throw new Error('Mật khẩu không đúng');
   } catch (err) {
     if (/Mật khẩu không đúng/.test(err.message)) throw err;

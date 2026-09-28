@@ -1289,7 +1289,7 @@ async function loadProviders() {
 // Lồng tiếng
 // ---------------------------------------------------------------------------
 
-const dubState = { segments: [], jobId: null, busy: false };
+const dubState = { segments: [], title: '', nameTouched: false, jobId: null, busy: false };
 
 function dubLog(msg) {
   const box = $('#dubLog');
@@ -1309,7 +1309,7 @@ async function initDubbing() {
 
   try {
     const s = await window.api.tts.session();
-    const on = s && s.ok;
+    const on = !!(s && (s.authenticated || s.ok));
     if ($('#ttsStatus')) {
       $('#ttsStatus').textContent = on
         ? `Đã đăng nhập${s.nickname ? ' với tên ' + s.nickname : ''}.`
@@ -1350,6 +1350,13 @@ async function renderDubHistory() {
       if (info) info.textContent = 'Đang tải transcript…';
       try {
         dubState.segments = await window.api.history.segments(id);
+        dubState.title = h.title || '';
+        // Tự điền tên file theo dạng "LỒNG TIẾNG - <tên video>", nhưng không
+        // ghi đè nếu bạn đã sửa tay.
+        const nameBox = $('#dubOutName');
+        if (nameBox && !dubState.nameTouched) {
+          nameBox.value = 'LỒNG TIẾNG - ' + (dubState.title || 'video');
+        }
         if (info) {
           info.textContent =
             `Đã chọn ${dubState.segments.length} đoạn. ` +
@@ -1405,6 +1412,10 @@ function wireDubbing() {
   });
 
   window.api.dubbing.onProgress(({ message }) => dubLog(message));
+
+  $('#dubOutName')?.addEventListener('input', () => {
+    dubState.nameTouched = true;   // đã sửa tay -> không tự điền lại
+  });
 
   $('#btnDubRun')?.addEventListener('click', async () => {
     if (!dubState.segments.length) {
