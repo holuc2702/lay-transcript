@@ -143,12 +143,10 @@
                 <code>LỒNG TIẾNG - &lt;tên video&gt;</code>. Sửa tay tuỳ ý.
               </p>
             </div>
-            <div class="field">
-              <label class="checkbox">
-                <input type="checkbox" id="dubTranslate" checked />
-                <span>Dịch sang tiếng Việt trước khi tạo voice</span>
-              </label>
-            </div>
+            <p class="hint">
+              Muốn dịch hay dùng nguyên lời thoại gốc, bạn quyết định ở Bước 4 —
+              sau khi xem lại và sửa bản dịch.
+            </p>
           </div>
 
           <div class="card">
@@ -215,8 +213,34 @@
             <p class="hint" id="dubPickHint" style="margin-top:12px"></p>
           </div>
 
+          <div class="card" id="cardTranslate" hidden>
+            <h3>Bước 4 — Dịch và xem lại</h3>
+            <p class="hint">
+              Dịch trước rồi đọc lại, sửa chỗ dịch sai — tránh tạo voice tốn
+              thời gian và quota rồi mới phát hiện sai.
+            </p>
+            <div class="row wrap">
+              <button class="btn" id="btnDubTranslate" disabled>Dịch toàn bộ</button>
+              <span class="hint" id="dubTransProgress"></span>
+            </div>
+            <div class="field" style="margin-top:12px">
+              <label class="field-label" for="dubScriptBox">Bản dịch — sửa trực tiếp tại đây</label>
+              <textarea id="dubScriptBox" rows="10" placeholder="Bấm “Dịch toàn bộ” hoặc dán bản dịch của bạn."></textarea>
+              <p class="hint">
+                Mỗi dòng là một câu. Có dấu <code>--</code> giữa hai câu thì app
+                hiểu đó là ranh giới thời gian (ví dụ: <code>câu một--câu hai</code>).
+                Sau khi sửa xong bấm **Áp dụng &amp; căn timing**.
+              </p>
+            </div>
+            <div class="row wrap">
+              <button class="btn primary" id="btnApplyScript" disabled>Áp dụng &amp; căn timing</button>
+              <button class="btn ghost" id="btnSkipScript">Giữ nguyên bản gốc, không dịch</button>
+            </div>
+            <p class="hint" id="dubScriptInfo"></p>
+          </div>
+
           <div class="card">
-            <h3>Bước 4 — Tạo giọng đọc</h3>
+            <h3 id="dubRunTitle">Bước 5 — Tạo giọng đọc</h3>
             <div class="row wrap">
               <button class="btn primary" id="btnDubRun" disabled>Tạo giọng đọc</button>
               <button class="btn ghost" id="btnDubCancel" hidden>Dừng</button>
@@ -224,6 +248,12 @@
             <p class="hint" id="dubSegmentsInfo">Chưa chọn video nào.</p>
             <div id="dubLog" class="log-box"></div>
             <div id="dubResult" class="dub-result" hidden></div>
+          </div>
+
+          <div class="card" id="cardPreview" hidden>
+            <h3>Nghe thử &amp; mở thư mục</h3>
+            <div class="row wrap" id="dubPreviewBox"></div>
+            <p class="hint" id="dubPreviewInfo"></p>
           </div>
         </div>
       </section>

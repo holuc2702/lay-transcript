@@ -627,6 +627,51 @@ handle('dubbing:align', (translatedText, originalSegments) =>
   align.alignTranslation(translatedText, originalSegments)
 );
 
+/**
+ * Dịch toàn bộ các đoạn, để người dùng XEM LẠI và sửa trước khi tạo voice.
+ * Trả về mảng văn bản đã dịch, giữ nguyên thứ tự.
+ */
+handle('dubbing:translateAll', async (segments) => {
+  if (!Array.isArray(segments) || !segments.length) throw new Error('Chưa có nội dung.');
+  const log = (message) => broadcast('dubbing:progress', { message });
+  const out = [];
+  let failed = 0;
+  for (let i = 0; i < segments.length; i++) {
+    const src = String(segments[i].text || '').trim();
+    if (!src) {
+      out.push('');
+      continue;
+    }
+    try {
+      const r = await providers.translate(src);
+      out.push(r.text);
+    } catch {
+      failed++;
+      out.push(src); // dịch lỗi thì giữ nguyên, người dùng tự sửa
+    }
+    if ((i + 1) % 3 === 0 || i === segments.length - 1) {
+      log(`  đã dịch ${i + 1}/${segments.length} đoạn${failed ? ` (${failed} lỗi)` : ''}`);
+    }
+  }
+  if (failed) log(`Có ${failed} đoạn không dịch được, giữ nguyên tiếng gốc.`);
+  return out;
+});
+
+/** Mở thư mục chứa file vừa ghép. */
+handle('dubbing:reveal', (file) => {
+  if (!file) return false;
+  shell.showItemInFolder(file);
+  return true;
+});
+
+/** Đọc nội dung một file .srt đã tạo để xem lại. */
+handle('dubbing:readFile', (file) => {
+  if (!file || !fs.existsSync(file)) return null;
+  const n = fs.statSync(file).size;
+  if (n > 4 * 1024 * 1024) throw new Error('File quá lớn để xem trong app.');
+  return fs.readFileSync(file, 'utf8');
+});
+
 /** Dịch -> tạo voice từng đoạn -> căn timing -> ghép thành 1 file. */
 handle('dubbing:run', async (payload) => {
   const {

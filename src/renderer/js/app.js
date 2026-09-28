@@ -132,6 +132,7 @@ async function init() {
 
   wireSettingsInputs();
   wireAllEvents();
+  void initDubbing();
 
   // Logo: nạp icon thật (không cần await — chỉ là thao tác DOM).
   const mark = $('#brandMark');
@@ -1295,6 +1296,8 @@ const dubState = {
   nameTouched: false,
   source: 'history',
   sourceSegments: [],   // khung thời gian gốc (dùng để căn bản dịch có sẵn)
+  script: [],           // bản dịch đã duyệt, sẵn sàng tạo voice
+  lastResult: null,     // file vừa ghép, để nghe thử
 };
 
 
@@ -1307,7 +1310,10 @@ function markTtsLoggedIn() {
   if (pw) pw.disabled = true;
 }
 
-/** Chuẩn bị được nội dung để lồng tiếng -> mở khoá nút Bước 4. */
+/**
+ * Chuẩn bị xong nguồn -> mở khoá Bước 4 (dịch & xem lại).
+ * Chưa mở khoá Bước 5 cho tới khi người dùng duyệt xong bản dịch.
+ */
 function setDubSourceReady(title, count) {
   dubState.title = title || '';
   if (!dubState.nameTouched) {
@@ -1317,12 +1323,88 @@ function setDubSourceReady(title, count) {
   const info = $('#dubSegmentsInfo');
   if (info) {
     info.textContent =
-      `Sẵn sàng lồng tiếng: ${count} đoạn, tổng ` +
-      `${Math.round(dubState.segments.reduce((a, s) => a + (s.end - s.start), 0))} giây.`;
+      `Đã có ${count} đoạn (${Math.round(
+        dubState.segments.reduce((a, s) => a + (s.end - s.start), 0)
+      )} giây). ` +
+      'Xem lại bản dịch ở Bước 4 rồi mới tạo giọng đọc.';
   }
-  const btn = $('#btnDubRun');
-  if (btn) btn.disabled = false;
-  dubLog(`Sẵn sàng: ${count} đoạn.`);
+  // Bước 4 (dịch & xem lại) mở khoá, Bước 5 thì chưa.
+  const tr = $('#btnDubTranslate');
+  if (tr) tr.disabled = false;
+  const skip = $('#btnSkipScript');
+  if (skip) skip.disabled = false;
+  const rb = $('#btnDubRun');
+  if (rb) rb.disabled = true;
+  const card = $('#cardTranslate');
+  if (card) card.hidden = false;
+  if (!$('#dubScriptBox')?.value.trim()) {
+    const ta = $('#dubScriptBox');
+    if (ta) ta.value = dubState.segments.map((s) => s.text.trim()).filter(Boolean).join('\n');
+  }
+  dubLog(`Sẵn sàng: ${count} đoạn. Xem lại bản dịch ở Bước 4.`);
+}
+
+/** Người dùng đã duyệt bản dịch -> mở khoá Bước 5. */
+function enableDubRun(msg) {
+  const rb = $('#btnDubRun');
+  if (rb) rb.disabled = false;
+  const card = $('#cardPreview');
+  if (card) card.hidden = false;
+  const info = $('#dubSegmentsInfo');
+  if (info && msg) info.textContent = msg;
+  const si = $('#dubScriptInfo');
+  if (si) si.textContent = msg || '';
+}
+
+/** Tách bản dịch người dùng nhập thành các đoạn, tôn trọng dấu '--'. */
+function parseScriptBox(text) {
+  const t = String(text || '').trim();
+  if (!t) return [];
+  // Dấu '--' là ranh giới thời gian do người dùng tự đánh dấu -> giữ nguyên vị trí.
+  if (t.includes('--')) {
+    return t
+      .split('--')
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+  return t
+    .split('\n')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/** Hiển thị kết quả: nghe thử + nút mở thư mục. */
+function showDubResult(r) {
+  dubState.lastResult = r;
+  const box = $('#dubPreviewBox');
+  const card = $('#cardPreview');
+  if (!box || !card) return;
+  const dir = r.wav.replace(/[/\\][^/\\]*$/, '');
+  card.hidden = false;
+  box.innerHTML = `
+    <div class="preview-row">
+      <audio controls preload="none" src="file://${r.mp3 || r.wav}"></audio>
+      <button class="btn tiny" data-dopen="${escapeAttr(r.wav)}">Mở .wav</button>
+      ${r.mp3 ? `<button class="btn tiny" data-dopen="${escapeAttr(r.mp3)}">Mở .mp3</button>` : ''}
+      <button class="btn tiny" data-dopen="${escapeAttr(r.srt)}">Mở .srt</button>
+      <button class="btn tiny primary" data-dreveal="${escapeAttr(r.wav)}">Mở thư mục</button>
+    </div>
+    <div class="preview-row">
+      <audio controls preload="none" src="file://${r.srt}"></audio>
+    </div>`;
+  box.querySelectorAll('[data-dopen]').forEach((b) => {
+    b.addEventListener('click', () => window.api.app.openPath(b.dataset.dopen));
+  });
+  box.querySelector('[data-dreveal]')?.addEventListener('click', (e) => {
+    window.api.dubbing.reveal(e.currentTarget.dataset.dreveal);
+  });
+  const info = $('#dubPreviewInfo');
+  if (info) {
+    info.textContent =
+      `Thư mục: ${dir}\n` +
+      `${r.summary.sped}/${r.summary.total} đoạn được tua nhẹ (tối đa ${r.summary.maxSpeed}x), ` +
+      `đoạn trôi nhiều nhất ${r.summary.maxDrift}s.`;
+  }
 }
 
 function updateAlignBtn() {
@@ -1356,7 +1438,11 @@ function dubLog(msg) {
 }
 
 async function initDubbing() {
-  const mac = await window.api.app.info().then((i) => i.platform === 'darwin').catch(() => false);
+  // Quyết định macOS CHỈ dựa vào navigator — không gọi app.info().
+  // `app:info` phải xác minh chữ ký các binary (yt-dlp, sidecar) nên lần chạy
+  // đầu mất 10-30 giây. Nếu chờ nó thì tự đăng nhập bị hoãn tới khi đó và
+  // người dùng tưởng phải nhập mật khẩu.
+  const mac = /Mac|iPhone|iPad/i.test(navigator.userAgent) || navigator.platform === 'MacIntel';
   if ($('#dubMac')) $('#dubMac').hidden = !mac;
   if ($('#dubUnsupported')) $('#dubUnsupported').hidden = mac;
   if (!mac) return;
@@ -1431,15 +1517,10 @@ async function renderDubHistory() {
         if (nameBox && !dubState.nameTouched) {
           nameBox.value = 'LỒNG TIẾNG - ' + (dubState.title || 'video');
         }
-        if (info) {
-          info.textContent =
-            `Đã chọn ${dubState.segments.length} đoạn. ` +
-            `Ước tính ${Math.round(
-              dubState.segments.reduce((a, s) => a + (s.end - s.start), 0)
-            )} giây giọng gốc.`;
-        }
-        const btn = $('#btnDubRun');
-        if (btn) btn.disabled = false;
+        // Lịch sử cũng là nguồn "khung thời gian gốc" cho bản dịch có sẵn.
+        dubState.sourceSegments = dubState.segments;
+        // Dùng chung một hàm để mọi nguồn đều mở Bước 4 giống nhau.
+        setDubSourceReady(title, dubState.segments.length);
         box.querySelectorAll('.dub-pick').forEach((x) => x.classList.remove('sel'));
         b.closest('.dub-pick').classList.add('sel');
       } catch (err) {
@@ -1575,6 +1656,64 @@ function wireDubbing() {
 
   window.api.dubbing.onProgress(({ message }) => dubLog(message));
 
+  // ---- Bước 4: dịch toàn bộ, xem lại, sửa ----
+  $('#btnDubTranslate')?.addEventListener('click', async () => {
+    const btn = $('#btnDubTranslate');
+    const info = $('#dubTransProgress');
+    btn.disabled = true;
+    btn.textContent = 'Đang dịch…';
+    try {
+      const r = await window.api.dubbing.translateAll(dubState.segments);
+      const ta = $('#dubScriptBox');
+      if (ta) ta.value = r.join('\n');
+      if (info) info.textContent = `Đã dịch ${r.length} đoạn. Đọc lại và sửa nếu cần.`;
+      $('#btnApplyScript').disabled = false;
+    } catch (err) {
+      toast(String(err.message).split('\n')[0], 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Dịch toàn bộ';
+    }
+  });
+
+  $('#dubScriptBox')?.addEventListener('input', () => {
+    if ($('#dubScriptBox').value.trim()) $('#btnApplyScript').disabled = false;
+  });
+
+  $('#btnApplyScript')?.addEventListener('click', async () => {
+    const lines = parseScriptBox($('#dubScriptBox').value);
+    if (!lines.length) {
+      toast('Bản dịch trống.', 'error');
+      return;
+    }
+    const btn = $('#btnApplyScript');
+    btn.disabled = true;
+    btn.textContent = 'Đang căn…';
+    try {
+      const segs = await window.api.dubbing.align(lines.join('\n'), dubState.sourceSegments);
+      if (!segs.length) throw new Error('Không căn được bản dịch vào khung thời gian.');
+      dubState.script = segs;
+      enableDubRun(
+        `Đã căn ${segs.length} câu vào khung thời gian. Bấm “Tạo giọng đọc” ở Bước 5.`
+      );
+      dubLog(`Căn xong ${segs.length} câu.`);
+    } catch (err) {
+      toast(String(err.message).split('\n')[0], 'error');
+    } finally {
+      btn.textContent = 'Áp dụng & căn timing';
+    }
+  });
+
+  $('#btnSkipScript')?.addEventListener('click', () => {
+    dubState.script = dubState.segments.map((s) => ({
+      start: s.start,
+      end: s.end,
+      text: s.text,
+    }));
+    enableDubRun(`Dùng nguyên lời thoại gốc, ${dubState.script.length} đoạn. Bấm “Tạo giọng đọc”.`);
+    dubLog('Bỏ qua bước dịch — dùng lời thoại gốc.');
+  });
+
   $('#dubOutName')?.addEventListener('input', () => {
     dubState.nameTouched = true;   // đã sửa tay -> không tự điền lại
   });
@@ -1589,10 +1728,12 @@ function wireDubbing() {
     btn.textContent = 'Đang tạo…';
     $('#dubResult').hidden = true;
     try {
+      // Dùng bản dịch ĐÃ DUYỆT ở Bước 4. Không tự dịch lần nữa ở đây — nếu không
+      // thì mọi chỉnh sửa của người dùng ở Bước 4 sẽ bị bỏ qua.
       const r = await window.api.dubbing.run({
-        segments: dubState.segments,
+        segments: dubState.script.length ? dubState.script : dubState.segments,
         voice: $('#dubVoice').value,
-        translate: $('#dubTranslate').checked,
+        translate: false,
         outName: $('#dubOutName').value,
       });
       const box = $('#dubResult');
@@ -1608,9 +1749,7 @@ function wireDubbing() {
           ${r.mp3 ? `<button class="btn tiny" data-dopen="${escapeAttr(r.mp3)}">Mở file .mp3</button>` : ''}
           <button class="btn tiny" data-dopen="${escapeAttr(r.srt)}">Mở .srt</button>
         </div>`;
-      box.querySelectorAll('[data-dopen]').forEach((b) => {
-        b.addEventListener('click', () => window.api.app.openPath(b.dataset.dopen));
-      });
+      showDubResult(r);
       toast('Đã tạo xong file giọng đọc.', 'ok');
     } catch (err) {
       toast(String(err.message).split('\n')[0], 'error');
@@ -1642,7 +1781,6 @@ function wireDubbing() {
   });
 
   void loadProviders();
-  void initDubbing();
 }
 
 // ---------------------------------------------------------------------------
