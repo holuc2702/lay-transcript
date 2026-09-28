@@ -1208,3 +1208,12 @@ details p {
   flex: none;
   width: 52px;
 }
+
+/* Chọn cách lấy lời thoại (Bước 4) — dùng chung kiểu với Bước 3 */
+.txt-body {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
