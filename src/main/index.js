@@ -739,10 +739,14 @@ handle('dubbing:run', async (payload) => {
     segments.reduce((a, x) => a + Math.max(0, (Number(x.end) || 0) - (Number(x.start) || 0)), 0)
   );
   const mins = Math.round(totalSec / 60);
-  const jobDir = paths.writableDir(
+  // Thư mục GIỮ lại các file voice đã tạo (để sau không phải tạo lại), đặt
+  // theo tên video. File tải từ 3A tạm ở thư mục riêng, xoá sau khi copy xong
+  // để thư mục lưu chỉ còn file có tên dễ đọc.
+  const keepDir = paths.writableDir(
     'dubbing-voice',
     `${safeName(payload.voiceDirName || '')}_${mins}ph`
   );
+  const jobDir = paths.writableDir('dubbing-tmp', Date.now().toString(36));
   const outDir = voiceDir || paths.writableDir('dubbing-out');
   const ffmpegPath = jobsLib.ffmpegPath();
   const log = (message) => broadcast('dubbing:progress', { message });
