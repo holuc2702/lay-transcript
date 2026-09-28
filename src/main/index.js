@@ -18,6 +18,7 @@ const providers = require('./providers');
 const tts = require('./tts');
 const timing = require('./timing');
 const dubbing = require('./dubbing');
+const align = require('./align');
 
 const isDev = !app.isPackaged;
 
@@ -521,9 +522,110 @@ handle('providers:test', async (id) => {
 });
 
 // --- Lồng tiếng (TTS + căn timing) ---
-handle('tts:login', (password) => tts.login(password));
+handle('tts:login', async (password, remember) => {
+  const r = await tts.login(password);
+  if (remember) tts.savePassword(password);
+  return r;
+});
 handle('tts:session', () => tts.session());
-handle('tts:logout', () => tts.logout());
+handle('tts:logout', async () => {
+  await tts.logout();
+  tts.forgetPassword();
+  return true;
+});
+/** Mật khẩu đã lưu — dùng để tự đăng nhập lúc mở app. */
+handle('tts:savedPassword', () => tts.loadPassword());
+/** Tự đăng nhập nếu có mật khẩu đã lưu. */
+handle('tts:autoLogin', async () => {
+  const pw = tts.loadPassword();
+  if (!pw) return { ok: false, reason: 'chưa lưu mật khẩu' };
+  try {
+    return await tts.login(pw);
+  } catch (err) {
+    return { ok: false, reason: err.message };
+  }
+});
+
+/** Chọn file bản dịch có sẵn (txt/srt/vtt, chưa cần số phút). */
+handle('dubbing:pickTranslation', async () => {
+  const r = await dialog.showOpenDialog(mainWindow, {
+    title: 'Chọn file bản dịch (txt hoặc srt)',
+    properties: ['openFile'],
+    filters: [{ name: 'Bản dịch', extensions: ['txt', 'srt', 'vtt', 'md'] }],
+  });
+  if (r.canceled) return null;
+  const file = r.filePaths[0];
+  const parsed = align.parseTranslatedFile(fs.readFileSync(file, 'utf8'));
+  return {
+    file,
+    text: parsed.text,
+    hadTimestamps: parsed.hadTimestamps,
+    name: path.basename(file, path.extname(file)),
+  };
+});
+
+/** Chọn video/audio gốc chưa có trong lịch sử. */
+handle('dubbing:pickSource', async () => {
+  const r = await dialog.showOpenDialog(mainWindow, {
+    title: 'Chọn video hoặc audio gốc',
+    properties: ['openFile'],
+    filters: [
+      { name: 'Video / Audio', extensions: ['mp4', 'mkv', 'mov', 'avi', 'webm', 'm4a', 'mp3', 'wav', 'aac', 'flac', 'opus', 'ogg', 'm4v'] },
+    ],
+  });
+  return r.canceled ? null : r.filePaths[0];
+});
+
+/**
+ * Nhận dạng giọng nói từ một file cục bộ (video/audio gốc chưa có trong lịch sử).
+ * Dùng chung sidecar Whisper với tab Tạo transcript.
+ */
+handle('dubbing:analyzeSource', async (filePath, opts) => {
+  if (process.platform !== 'darwin') throw new Error('Chỉ hỗ trợ trên macOS.');
+  if (!filePath || !fs.existsSync(filePath)) throw new Error('Không thấy file.');
+  const ffmpegPath = jobsLib.ffmpegPath();
+  const work = paths.writableDir('dubbing-src', Date.now().toString(36));
+  const wav = path.join(work, 'src16k.wav');
+  const jobId = `src-${Date.now().toString(36)}`;
+  const log = (m) => broadcast('dubbing:progress', { message: m });
+  log('Đang chuẩn hoá audio…');
+  await jobsLib.normalizeAudio(filePath, wav, () => {});
+  log('Đang nhận diện giọng nói (Whisper)…');
+  // Các đoạn transcript đến qua SỰ KIỆN, không nằm trong kết quả trả về.
+  // Phải gom bằng listener rồi gỡ đi, nếu không sẽ tích tụ listener mỗi lần gọi.
+  const collected = [];
+  const off = pipeline.worker.on((ev) => {
+    if (ev.event === 'segment' && ev.jobId === jobId) {
+      collected.push({ start: ev.start, end: ev.end, text: ev.text, words: ev.words });
+    }
+  });
+  let res;
+  try {
+    res = await pipeline.worker.send(
+      {
+        cmd: 'transcribe',
+        jobId,
+        audio: wav,
+        modelsDir: paths.modelsDir(),
+        opts: { model: opts?.model || 'small', language: 'auto', vadFilter: true, batchSize: 1 },
+      },
+      { timeout: 0 }
+    );
+  } finally {
+    off();
+  }
+  log(`Xong: ${collected.length} đoạn.`);
+  return {
+    segments: collected,
+    total: res?.elapsed ?? 0,
+    name: path.basename(filePath, path.extname(filePath)),
+  };
+});
+
+/** Căn bản dịch (chưa có số phút) vào khung thời gian của bản gốc. */
+handle('dubbing:align', (translatedText, originalSegments) =>
+  align.alignTranslation(translatedText, originalSegments)
+);
 
 /** Dịch -> tạo voice từng đoạn -> căn timing -> ghép thành 1 file. */
 handle('dubbing:run', async (payload) => {

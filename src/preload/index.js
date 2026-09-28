@@ -67,12 +67,18 @@ contextBridge.exposeInMainWorld('api', {
     test: (id) => call('providers:test', id),
   },
   tts: {
-    login: (password) => call('tts:login', password),
+    login: (password, remember) => call('tts:login', password, remember),
     session: () => call('tts:session'),
     logout: () => call('tts:logout'),
+    autoLogin: () => call('tts:autoLogin'),
+    hasSavedPassword: () => call('tts:savedPassword'),
   },
   dubbing: {
     run: (payload) => call('dubbing:run', payload),
+    pickTranslation: () => call('dubbing:pickTranslation'),
+    pickSource: () => call('dubbing:pickSource'),
+    analyzeSource: (file, opts) => call('dubbing:analyzeSource', file, opts),
+    align: (text, segs) => call('dubbing:align', text, segs),
     onProgress: (cb) => subscribe('dubbing:progress', cb),
   },
   history: {

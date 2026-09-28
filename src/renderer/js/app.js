@@ -1289,7 +1289,61 @@ async function loadProviders() {
 // Lồng tiếng
 // ---------------------------------------------------------------------------
 
-const dubState = { segments: [], title: '', nameTouched: false, jobId: null, busy: false };
+const dubState = {
+  segments: [],
+  title: '',
+  nameTouched: false,
+  source: 'history',
+  sourceSegments: [],   // khung thời gian gốc (dùng để căn bản dịch có sẵn)
+};
+
+
+function markTtsLoggedIn() {
+  const st = $('#ttsStatus');
+  if (st) st.textContent = 'Đã đăng nhập.';
+  const lo = $('#btnTtsLogout');
+  if (lo) lo.hidden = false;
+  const pw = $('#ttsPassword');
+  if (pw) pw.disabled = true;
+}
+
+/** Chuẩn bị được nội dung để lồng tiếng -> mở khoá nút Bước 4. */
+function setDubSourceReady(title, count) {
+  dubState.title = title || '';
+  if (!dubState.nameTouched) {
+    const box = $('#dubOutName');
+    if (box) box.value = 'LỒNG TIẾNG - ' + (title || 'video');
+  }
+  const info = $('#dubSegmentsInfo');
+  if (info) {
+    info.textContent =
+      `Sẵn sàng lồng tiếng: ${count} đoạn, tổng ` +
+      `${Math.round(dubState.segments.reduce((a, s) => a + (s.end - s.start), 0))} giây.`;
+  }
+  const btn = $('#btnDubRun');
+  if (btn) btn.disabled = false;
+  dubLog(`Sẵn sàng: ${count} đoạn.`);
+}
+
+function updateAlignBtn() {
+  const hasText = !!(dubState.transText || '').trim();
+  const hasBase = Array.isArray(dubState.sourceSegments) && dubState.sourceSegments.length > 0;
+  const btn = $('#btnAlignTrans');
+  if (btn) btn.disabled = !(hasText && hasBase);
+}
+
+/** Danh sách bản gốc dùng làm khung thời gian cho bản dịch có sẵn. */
+async function refreshBaseSelect() {
+  const sel = $('#dubTransBaseSel');
+  if (!sel) return;
+  await loadHistory();
+  const done = state.history.filter((h) => h.segmentCount > 0);
+  sel.innerHTML =
+    '<option value="">— chọn video gốc —</option>' +
+    done.map((h) => `<option value="${escapeAttr(h.id)}">${escapeHtml(h.title || 'Video')}</option>`).join('');
+  if (done.length && !sel.value) sel.value = done[0].id;
+  if (sel.value) sel.dispatchEvent(new Event('change'));
+}
 
 function dubLog(msg) {
   const box = $('#dubLog');
@@ -1307,19 +1361,34 @@ async function initDubbing() {
   if ($('#dubUnsupported')) $('#dubUnsupported').hidden = mac;
   if (!mac) return;
 
+  // Tự đăng nhập nếu trước đó đã chọn "Ghi nhớ mật khẩu".
+  let on = false;
   try {
-    const s = await window.api.tts.session();
-    const on = !!(s && (s.authenticated || s.ok));
-    if ($('#ttsStatus')) {
-      $('#ttsStatus').textContent = on
-        ? `Đã đăng nhập${s.nickname ? ' với tên ' + s.nickname : ''}.`
-        : 'Chưa đăng nhập.';
+    const r = await window.api.tts.autoLogin();
+    if (r && r.ok) {
+      on = true;
+      markTtsLoggedIn();
+      dubLog('Đã tự đăng nhập 3A bằng mật khẩu đã lưu.');
+    } else if (r && r.reason && r.reason !== 'chưa lưu mật khẩu') {
+      // Mật khẩu đã lưu nhưng không còn đúng -> báo để người dùng nhập lại
+      const st = $('#ttsStatus');
+      if (st) st.textContent = 'Mật khẩu đã lưu không còn đúng. Nhập lại nhé.';
     }
-    if ($('#btnTtsLogout')) $('#btnTtsLogout').hidden = !on;
-    if ($('#ttsPassword')) $('#ttsPassword').disabled = on;
   } catch {
     /* bỏ qua */
   }
+  if (!on) {
+    try {
+      const s = await window.api.tts.session();
+      on = !!(s && (s.authenticated || s.ok));
+      if (on) markTtsLoggedIn();
+    } catch {
+      /* bỏ qua */
+    }
+  }
+  if ($('#ttsStatus') && !on) $('#ttsStatus').textContent = 'Chưa đăng nhập.';
+  if ($('#btnTtsLogout')) $('#btnTtsLogout').hidden = !on;
+  if ($('#ttsPassword')) $('#ttsPassword').disabled = on;
   await renderDubHistory();
 }
 
@@ -1334,7 +1403,7 @@ async function renderDubHistory() {
   }
   box.innerHTML = done
     .map(
-      (h) => `<div class="dub-pick" data-id="${escapeAttr(h.id)}">
+      (h) => `<div class="dub-pick" data-id="${escapeAttr(h.id)}" data-title="${escapeAttr(h.title || 'Video')}">
         <div>
           <b>${escapeHtml(h.title || 'Video')}</b>
           <small>${escapeHtml(h.createdAt ? new Date(h.createdAt).toLocaleString('vi-VN') : '')} · ${h.segmentCount} đoạn</small>
@@ -1345,12 +1414,17 @@ async function renderDubHistory() {
     .join('');
   box.querySelectorAll('[data-dpick]').forEach((b) => {
     b.addEventListener('click', async () => {
-      const id = b.closest('.dub-pick').dataset.id;
+      const row = b.closest('.dub-pick');
+      const id = row.dataset.id;
+      // Đọc tên từ data-title. Trước đây dùng biến `h` — nhưng `h` chỉ tồn
+      // tại trong `.map()` dựng HTML, handler bấm nút không nhìn thấy nó ->
+      // báo "h is not defined" và nút Chọn không bao giờ hoạt động.
+      const title = row.dataset.title || '';
       const info = $('#dubSegmentsInfo');
       if (info) info.textContent = 'Đang tải transcript…';
       try {
         dubState.segments = await window.api.history.segments(id);
-        dubState.title = h.title || '';
+        dubState.title = title;
         // Tự điền tên file theo dạng "LỒNG TIẾNG - <tên video>", nhưng không
         // ghi đè nếu bạn đã sửa tay.
         const nameBox = $('#dubOutName');
@@ -1390,16 +1464,104 @@ function wireDubbing() {
     const btn = $('#btnTtsLogin');
     btn.disabled = true;
     try {
-      await window.api.tts.login(pw);
-      $('#ttsStatus').textContent = 'Đã đăng nhập.';
-      $('#btnTtsLogout').hidden = false;
-      $('#ttsPassword').disabled = true;
+      await window.api.tts.login(pw, $('#ttsRemember')?.checked !== false);
+      markTtsLoggedIn();
       toast('Đăng nhập thành công.', 'ok');
     } catch (err) {
       $('#ttsStatus').textContent = 'Lỗi: ' + err.message;
       toast(err.message, 'error');
     } finally {
       btn.disabled = false;
+    }
+  });
+
+  // Chuyển qua lại 3 nguồn ở Bước 3
+  $$('.src-tab').forEach((t) => {
+    t.addEventListener('click', () => {
+      $$('.src-tab').forEach((x) => x.classList.toggle('active', x === t));
+      $$('.src-body').forEach((b) => (b.hidden = b.dataset.srcbody !== t.dataset.src));
+      dubState.source = t.dataset.src;
+      if (t.dataset.src === 'translated') void refreshBaseSelect();
+    });
+  });
+
+  // Nguồn 2: chọn file gốc rồi nhận diện
+  $('#btnPickSource')?.addEventListener('click', async () => {
+    const f = await window.api.dubbing.pickSource();
+    if (!f) return;
+    dubState.sourcePath = f;
+    $('#dubSourcePath').value = f.split('/').pop();
+    $('#btnAnalyzeSource').disabled = false;
+    $('#dubSourceInfo').textContent = 'Sẵn sàng. Bấm “Nhận dịch”.';
+  });
+  $('#btnAnalyzeSource')?.addEventListener('click', async () => {
+    if (!dubState.sourcePath) return;
+    const btn = $('#btnAnalyzeSource');
+    btn.disabled = true;
+    btn.textContent = 'Đang nhận diệch…';
+    try {
+      const r = await window.api.dubbing.analyzeSource(dubState.sourcePath, { model: 'small' });
+      dubState.segments = r.segments || [];
+      dubState.sourceSegments = r.segments || [];
+      setDubSourceReady(r.name, r.segments.length);
+    } catch (err) {
+      $('#dubSourceInfo').textContent = 'Lỗi: ' + err.message;
+      toast(err.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Nhận dịch';
+    }
+  });
+
+  // Nguồn 3: bản dịch có sẵn
+  $('#btnPickTrans')?.addEventListener('click', async () => {
+    const r = await window.api.dubbing.pickTranslation();
+    if (!r) return;
+    dubState.transText = r.text;
+    $('#dubTransPath').value = r.file.split('/').pop();
+    $('#dubTransText').value = r.text;
+    if (r.hadTimestamps) {
+      toast('File có sẵn số phút — app đã bỏ số phút đi và sẽ tự căn lại.', 'ok');
+    }
+    $('#dubTransInfo').textContent = `Đã nạp ${r.text.length} ký tự. Chọn bản gốc rồi bấm Phân tích.`;
+    updateAlignBtn();
+  });
+  $('#btnPasteTrans')?.addEventListener('click', () => {
+    $('#dubTransText').focus();
+    $('#dubTransInfo').textContent = 'Dán bản dịch vào ô bên trên.';
+    updateAlignBtn();
+  });
+  $('#dubTransText')?.addEventListener('input', () => {
+    dubState.transText = $('#dubTransText').value;
+    updateAlignBtn();
+  });
+  $('#dubTransBaseSel')?.addEventListener('change', async (e) => {
+    const id = e.target.value;
+    if (!id) return;
+    try {
+      const segs = await window.api.history.segments(id);
+      dubState.sourceSegments = segs;
+      const h = state.history.find((x) => x.id === id);
+      $('#dubTransBase').value = h ? h.title : '';
+      updateAlignBtn();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  });
+  $('#btnAlignTrans')?.addEventListener('click', async () => {
+    const btn = $('#btnAlignTrans');
+    btn.disabled = true;
+    btn.textContent = 'Đang khớp…';
+    try {
+      const segs = await window.api.dubbing.align(dubState.transText, dubState.sourceSegments);
+      dubState.segments = segs;
+      setDubSourceReady('bản dịch đã khớp', segs.length);
+      toast(`Đã khớp ${segs.length} câu vào khung thời gian.`, 'ok');
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Phân tích & khớp bản dịch';
     }
   });
 

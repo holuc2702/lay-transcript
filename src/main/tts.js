@@ -45,6 +45,42 @@ function loadCookies() {
   }
 }
 
+/**
+ * Mật khẩu đã lưu (tuỳ chọn). Lần sau mở app không phải nhập lại.
+ * Chỉ nằm trong máy người dùng, dạng file văn bản thuần trong userData.
+ */
+function passwordFile() {
+  return path.join(require('./paths').writableDir('cache'), '3a-password.txt');
+}
+
+function savePassword(pw) {
+  try {
+    if (pw) {
+      fs.writeFileSync(passwordFile(), String(pw), { mode: 0o600 });
+      return true;
+    }
+  } catch {
+    /* không sao */
+  }
+  return false;
+}
+
+function loadPassword() {
+  try {
+    return fs.readFileSync(passwordFile(), 'utf8').trim();
+  } catch {
+    return '';
+  }
+}
+
+function forgetPassword() {
+  try {
+    fs.unlinkSync(passwordFile());
+  } catch {
+    /* không sao */
+  }
+}
+
 function saveCookies(setCookieHeaders) {
   // Gom nhiều header Set-Cookie thành một chuỗi "k=v; k2=v2"
   const pairs = setCookieHeaders
@@ -394,6 +430,9 @@ module.exports = {
   BASE,
   login,
   logout,
+  savePassword,
+  loadPassword,
+  forgetPassword,
   session,
   synthesize,
   collectJobIds,

@@ -113,6 +113,10 @@
               <button class="btn" id="btnTtsLogin">Đăng nhập</button>
               <button class="btn ghost" id="btnTtsLogout" hidden>Đăng xuất</button>
             </div>
+            <label class="checkbox" style="margin-top:8px">
+              <input type="checkbox" id="ttsRemember" checked />
+              <span>Ghi nhớ mật khẩu — lần sau mở app không phải nhập lại</span>
+            </label>
             <p class="hint" id="ttsStatus">Chưa đăng nhập.</p>
           </div>
 
@@ -148,12 +152,67 @@
           </div>
 
           <div class="card">
-            <h3>Bước 3 — Chọn video trong lịch sử</h3>
-            <div id="dubHistoryList" class="dub-pick-list"></div>
-            <p class="hint" id="dubPickHint">
-              Mở tab <strong>Lịch sử</strong>, bấm <strong>Xem</strong> ở một video rồi
-              quay lại đây, hoặc chọn từ danh sách bên trên.
-            </p>
+            <h3>Bước 3 — Chọn nguồn để lồng tiếng</h3>
+            <div class="src-tabs" role="tablist">
+              <button class="src-tab active" data-src="history">Từ lịch sử</button>
+              <button class="src-tab" data-src="source">Video/audio gốc</button>
+              <button class="src-tab" data-src="translated">Bản dịch có sẵn</button>
+            </div>
+
+            <!-- Nguồn 1: lịch sử -->
+            <div class="src-body" data-srcbody="history">
+              <div id="dubHistoryList" class="dub-pick-list"></div>
+            </div>
+
+            <!-- Nguồn 2: file gốc chưa có trong lịch sử -->
+            <div class="src-body" data-srcbody="source" hidden>
+              <p class="hint">
+                Chọn file video hoặc audio trên máy. App sẽ tự tải audio về, nhận
+                diện giọng nói bằng Whisper, rồi dịch và lồng tiếng. Không cần
+                tải video từ YouTube.
+              </p>
+              <div class="row">
+                <input type="text" id="dubSourcePath" readonly placeholder="Chưa chọn file" />
+                <button class="btn" id="btnPickSource">Chọn file…</button>
+                <button class="btn" id="btnAnalyzeSource" disabled>Nhận dịch</button>
+              </div>
+              <p class="hint" id="dubSourceInfo">Nhận dịch một video dài có thể mất vài phút.</p>
+            </div>
+
+            <!-- Nguồn 3: bản dịch có sẵn, chưa có số phút -->
+            <div class="src-body" data-srcbody="translated" hidden>
+              <p class="hint">
+                Bạn đã có sẵn bản dịch tiếng Việt nhưng chưa có số phút. App sẽ
+                <strong>tự phân tích và khớp</strong> bản dịch với khung thời gian
+                của bản gốc — bạn không cần tải video gốc, cũng không cần số giây
+                có sẵn.
+              </p>
+              <div class="field">
+                <label class="field-label" for="dubTransFile">File bản dịch (.txt hoặc .srt)</label>
+                <div class="row">
+                  <input type="text" id="dubTransPath" readonly placeholder="Chưa chọn file" />
+                  <button class="btn" id="btnPickTrans">Chọn file…</button>
+                  <button class="btn" id="btnPasteTrans">Dán văn bản</button>
+                </div>
+              </div>
+              <div class="field">
+                <label class="field-label" for="dubTransText">
+                  Hoặc dán thẳng bản dịch vào đây
+                </label>
+                <textarea id="dubTransText" rows="5" placeholder="Mỗi dòng là một câu, hoặc dán cả đoạn văn bản thuần."></textarea>
+              </div>
+              <div class="field">
+                <label class="field-label" for="dubTransBase">Bản gốc để lấy khung thời gian</label>
+                <div class="row">
+                  <input type="text" id="dubTransBase" readonly placeholder="Chọn từ lịch sử ở tab bên cạnh" />
+                  <select id="dubTransBaseSel" class="inline-sel"></select>
+                </div>
+              </div>
+              <button class="btn" id="btnAlignTrans" disabled>Phân tích &amp; khớp bản dịch</button>
+              <p class="hint" id="dubTransInfo">Chọn file/dán bản dịch và bản gốc, rồi bấm Phân tích.</p>
+            </div>
+
+            <p class="hint" id="dubPickHint" style="margin-top:12px"></p>
           </div>
 
           <div class="card">

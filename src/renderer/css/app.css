@@ -1053,3 +1053,44 @@ details p {
   font-size: 13px;
   color: var(--green);
 }
+
+/* ---------------- Chọn nguồn lồng tiếng ---------------- */
+
+.src-tabs {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.src-tab {
+  appearance: none;
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12.5px;
+  padding: 8px 14px;
+  cursor: pointer;
+  border-radius: 6px 6px 0 0;
+}
+
+.src-tab:hover {
+  color: var(--text);
+  background: var(--bg-elev-2);
+}
+
+.src-tab.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.src-body {
+  padding-top: 4px;
+}
+
+.inline-sel {
+  max-width: 320px;
+  flex: none;
+}
