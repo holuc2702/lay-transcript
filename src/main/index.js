@@ -737,7 +737,20 @@ handle('dubbing:run', async (payload) => {
       log(`  đoạn ${i + 1} tạo voice lỗi: ${err.message}`);
       continue;
     }
-    parts.push({ i, file: v.file, duration: v.duration ?? 0 });
+    // Bắt buộc phải mang theo start/end của đoạn trong script.
+    //
+    // THIẾU HAI TRƯỜNG NÀY THÌ BỘ CĂN KHÔNG BIẾT CÁCH ĐẶT KHUNG: mọi đoạn
+    // thành [0, 0] -> khung chỉ dài 0.2s -> xếp từ giây 0 liền nhau, không
+    // có khoảng nghỉ nào, và tổng thời lượng rút xuống bằng tổng độ dài lời
+    // (video 17 phút ra audio 8 phút). Đây đúng là lỗi "đọc liên tục, không
+    // khớp script".
+    parts.push({
+      i,
+      file: v.file,
+      duration: v.duration ?? 0,
+      start: Number(segments[i].start) || 0,
+      end: Number(segments[i].end) || Number(segments[i].start) || 0,
+    });
     made++;
   }
   if (!parts.length) throw new Error('Không tạo được file voice nào.');

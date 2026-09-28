@@ -36,6 +36,21 @@ function fitSegments(items) {
   const out = [];
   let cursor = -Infinity;
 
+  // Chốt an toàn: nếu AI ĐÓ truyền mất start/end, đoạn nào cũng thành [0, 0]
+  // và bộ căn sẽ xếp tất cả dồn về đầu, liền nhau, không có khoảng nghỉ.
+  // Thay vì âm thầm cho ra kết quả sai, tự dựng lại khung thời gian từ độ dài
+  // âm thanh sao cho kết quả vẫn nghe được.
+  const hasTiming = items.every((it) => Number.isFinite(Number(it.start)) && Number.isFinite(Number(it.end)));
+  if (!hasTiming) {
+    let t = 0;
+    for (let i = 0; i < n; i++) {
+      const d = Math.max(0.3, Number(items[i].duration) || 0.5);
+      items[i].start = t;
+      items[i].end = t + d;
+      t += d + 0.35; // chừa nghỉ giữa các câu
+    }
+  }
+
   for (let i = 0; i < n; i++) {
     const it = items[i];
     const origStart = Number(it.start) || 0;
