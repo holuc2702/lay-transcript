@@ -89,6 +89,19 @@
           <h2>Chưa có lịch sử</h2>
           <p>Các video bạn xử lý sẽ được lưu lại ở đây và không mất khi đóng app.</p>
         </div>
+
+        <div class="card" style="margin-top:16px">
+          <div class="history-head">
+            <div>
+              <h3 style="margin:0 0 2px">Lịch sử lồng tiếng</h3>
+              <p class="hint" style="margin:0">
+                <span id="dubHistCountMain">0</span> bản đã tạo. Bấm để nghe lại
+                hoặc mở thư mục.
+              </p>
+            </div>
+          </div>
+        </div>
+        <div id="dubHistListMain" class="history-list"></div>
       </section>
 
       <!-- ============ TAB: LỒNG TIẾNG ============ -->
@@ -172,11 +185,11 @@
               </label>
             </div>
 
-            <div class="src-body" data-srcbody="history">
+            <div class="src-body" data-srcbody="history" hidden>
               <div id="dubHistoryList" class="dub-pick-list"></div>
             </div>
 
-            <div class="src-body" data-srcbody="source" hidden>
+            <div class="src-body" data-srcbody="source">
               <div class="row">
                 <input type="text" id="dubSourcePath" readonly placeholder="Chưa chọn file" />
                 <button class="btn" id="btnPickSource">Chọn file…</button>

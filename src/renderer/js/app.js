@@ -273,6 +273,8 @@ function wireAllEvents() {
   void loadHistory();
 
   $('#btnHistoryRefresh')?.addEventListener('click', () => loadHistory());
+  void renderDubHistMain();
+
   $('#btnHistoryClear')?.addEventListener('click', async () => {
     if (!state.history.length) {
       toast('Lịch sử đang trống.', 'error');
@@ -1299,7 +1301,7 @@ const dubState = {
   segments: [],
   title: '',
   nameTouched: false,
-  source: 'history',
+  source: 'source',
   sourceSegments: [],   // khung thời gian gốc (dùng để căn bản dịch có sẵn)
   script: [],           // bản dịch đã duyệt, sẵn sàng tạo voice
   lastResult: null,     // file vừa ghép, để nghe thử
@@ -1448,6 +1450,64 @@ async function loadDubHistory() {
       } else if (act === 'del') {
         await window.api.dubbing.history.remove(dir);
         await loadDubHistory();
+      }
+    });
+  });
+}
+
+
+/** Lịch sử lồng tiếng, hiển thị ngay dưới lịch sử transcript ở tab Lịch sử. */
+async function renderDubHistMain() {
+  const box = $('#dubHistListMain');
+  if (!box) return;
+  let list = [];
+  try {
+    list = await window.api.dubbing.history.list();
+  } catch {
+    return;
+  }
+  const cnt = $('#dubHistCountMain');
+  if (cnt) cnt.textContent = String(list.length);
+  if (!list.length) {
+    box.innerHTML = '<p class="hint">Chưa có bản lồng tiếng nào.</p>';
+    return;
+  }
+  box.innerHTML = list
+    .map(
+      (h) => `<div class="dub-hist${h.missing ? ' missing' : ''}"
+          data-dir="${escapeAttr(h.dir || '')}"
+          data-mp3="${escapeAttr((h.files && h.files.mp3) || '')}">
+        <div class="dub-hist-main">
+          <div class="dub-hist-name">🎙 ${escapeHtml(h.name || h.title || 'video')}</div>
+          <div class="dub-hist-meta">
+            ${new Date(h.createdAt).toLocaleString('vi-VN')} · ${escapeHtml(h.voice || '')}
+            ${h.translator ? ' · dịch: ' + escapeHtml(h.translator) : ''} ·
+            ${h.segmentCount} câu · ${fmtDuration(h.duration || 0)}
+            ${h.missing ? ' · <b>thư mục đã bị xoá</b>' : ''}
+          </div>
+        </div>
+        <div class="dub-hist-actions">
+          ${h.missing ? '' : '<button class="btn tiny" data-mdh="play">Nghe</button>'}
+          ${h.missing ? '' : '<button class="btn tiny" data-mdh="reveal">Mở thư mục</button>'}
+          <button class="btn tiny ghost" data-mdh="del">✕</button>
+        </div>
+      </div>`
+    )
+    .join('');
+  box.querySelectorAll('[data-mdh]').forEach((b) => {
+    b.addEventListener('click', async () => {
+      const row = b.closest('.dub-hist');
+      const act = b.dataset.mdh;
+      if (act === 'play') {
+        const urls = await window.api.dubbing.registerMedia({ mp3: row.dataset.mp3 });
+        new Audio(urls.mp3).play().catch(() =>
+          toast('Không phát được — bấm “Mở thư mục” để nghe bằng trình phát.', 'error')
+        );
+      } else if (act === 'reveal') {
+        window.api.dubbing.reveal(row.dataset.mp3 || row.dataset.dir);
+      } else if (act === 'del') {
+        await window.api.dubbing.history.remove(row.dataset.dir);
+        await renderDubHistMain();
       }
     });
   });
@@ -1903,18 +1963,26 @@ function wireDubbing() {
       toast('Bản dịch trống.', 'error');
       return;
     }
+    if (!dubState.sourceSegments.length) {
+      toast('Chưa có khung thời gian. Chọn video ở Bước 3 trước đã.', 'error');
+      return;
+    }
     const btn = $('#btnApplyScript');
     btn.disabled = true;
     btn.textContent = 'Đang căn…';
     try {
-      const segs = await window.api.dubbing.align(lines.join('\n'), dubState.sourceSegments);
+      // align trả về OBJECT {segments, report} — trước đây trả về mảng thẳng,
+      // code cũ đọc .length của object nên luôn lỗi "Không căn được...".
+      const r = await window.api.dubbing.align(lines.join('\n'), dubState.sourceSegments);
+      const segs = r?.segments || [];
       if (!segs.length) throw new Error('Không căn được bản dịch vào khung thời gian.');
-      if (!segs.length) throw new Error('Bản dịch không có câu nào hợp lệ.');
       dubState.script = segs;
-      enableDubRun(
-        `Đã căn ${segs.length} câu vào khung thời gian. Bấm “Tạo giọng đọc” ở Bước 5.`
-      );
-      dubLog(`Căn xong ${segs.length} câu.`);
+      dubState.plan = segs;
+      const rep = r.report
+        ? ` (khớp ${r.report.percent}%, lệch tối đa ${r.report.maxDrift}s)`
+        : '';
+      enableDubRun(`Đã căn ${segs.length} câu vào khung thời gian${rep}. Bấm “Tạo giọng đọc” ở Bước 5.`);
+      dubLog(`Căn xong ${segs.length} câu${rep}.`);
     } catch (err) {
       toast(String(err.message).split('\n')[0], 'error');
     } finally {
