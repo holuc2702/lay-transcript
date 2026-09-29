@@ -1513,6 +1513,34 @@ async function renderDubHistMain() {
   });
 }
 
+
+/** Hiện đúng khối theo radio đang chọn, ẩn các khối còn lại. */
+function syncDubSourceBodies() {
+  const checked = document.querySelector('input[name=dubSrc]:checked');
+  const value = checked ? checked.value : dubState.source;
+  if (value) dubState.source = value;
+  $$('.src-opt').forEach((o) => {
+    const r = o.querySelector('input[name=dubSrc]');
+    o.classList.toggle('active', !!r && r.checked);
+  });
+  let shown = 0;
+  $$('.src-body').forEach((b) => {
+    const show = b.dataset.srcbody === dubState.source;
+    b.hidden = !show;
+    // Chống CSS đè thuộc tính hidden: ép display trực tiếp.
+    b.style.display = show ? '' : 'none';
+    if (show) shown++;
+  });
+  // Phòng hờ: nếu không khối nào hiện (lệch trạng thái), hiện khối theo state.
+  if (!shown) {
+    const fallback = document.querySelector(`.src-body[data-srcbody="${dubState.source}"]`);
+    if (fallback) {
+      fallback.hidden = false;
+      fallback.style.display = '';
+    }
+  }
+}
+
 /** Điền lời thoại sẽ đọc vào ô xem lại. */
 function setScriptBox(text) {
   const ta = $('#dubScriptBox');
@@ -1833,15 +1861,22 @@ function wireDubbing() {
     }
   });
 
+  // Đồng bộ khối hiển thị theo radio đang chọn.
+  // Gọi NGAY khi mở tab (không chờ click), vì trạng thái HTML ban đầu có thể
+  // lệch với state JS — đã gặp: radio chọn "file trên máy" nhưng khối hiện
+  // lại là "lịch sử".
+  syncDubSourceBodies();
   // Chuyển qua lại 3 nguồn ở Bước 3 (dạng thẻ chọn, dễ đọc hơn 3 tab)
   $$('input[name=dubSrc]').forEach((r) => {
     r.addEventListener('change', () => {
       // Bấm lại vào nguồn ĐANG CHỌN thì không làm gì. Trước đây cứ bấm là
       // xoá sạch, kể cả khi chưa đổi nguồn — mất hết dữ liệu đang làm dở.
-      if (dubState.source === r.value) return;
-      $$('.src-opt').forEach((o) => o.classList.toggle('active', o.contains(r) && r.checked));
-      $$('.src-body').forEach((b) => (b.hidden = b.dataset.srcbody !== r.value));
+      if (dubState.source === r.value) {
+        syncDubSourceBodies();
+        return;
+      }
       dubState.source = r.value;
+      syncDubSourceBodies();
       // Đổi nguồn = xoá sạch mọi thứ đã chuẩn bị cho nguồn cũ. Nếu không,
       // chọn "file mới" khi chưa nhận diện xong vẫn dùng được dữ liệu cũ của
       // video lịch sử và nút Tạo giọng đọc bật lên một cách sai.
