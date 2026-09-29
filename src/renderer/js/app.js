@@ -1836,10 +1836,6 @@ async function renderDubHistory() {
 }
 
 function wireDubbing() {
-  const mac = /Mac|iPhone|iPad/i.test(navigator.userAgent) || navigator.platform === 'MacIntel';
-  if ($('#dubUnsupported')) $('#dubUnsupported').hidden = mac;
-  if ($('#dubMac')) $('#dubMac').hidden = !mac;
-  if (!mac) return;
 
   $('#btnTtsLogin')?.addEventListener('click', async () => {
     const pw = $('#ttsPassword').value.trim();

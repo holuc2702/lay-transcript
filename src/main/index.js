@@ -612,7 +612,6 @@ handle('dubbing:pickSource', async () => {
  * Dùng chung sidecar Whisper với tab Tạo transcript.
  */
 handle('dubbing:analyzeSource', async (filePath, opts) => {
-  if (process.platform !== 'darwin') throw new Error('Chỉ hỗ trợ trên macOS.');
   if (!filePath || !fs.existsSync(filePath)) throw new Error('Không thấy file.');
   const ffmpegPath = jobsLib.ffmpegPath();
   const work = paths.writableDir('dubbing-src', Date.now().toString(36));
@@ -767,9 +766,6 @@ handle('dubbing:run', async (payload) => {
     translate = true,
   } = payload || {};
   if (!Array.isArray(segments) || !segments.length) throw new Error('Chưa có transcript.');
-  if (process.platform !== 'darwin') {
-    throw new Error('Tính năng lồng tiếng hiện chỉ dành cho macOS.');
-  }
 
   // Thư mục lưu voice, đặt theo tên video để sau này dễ tìm lại và không phải
   // tạo voice từ đầu. Tên thư mục kèm thời lượng để dễ đoán.
