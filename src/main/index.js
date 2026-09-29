@@ -924,8 +924,12 @@ handle('dubbing:run', async (payload) => {
   const wav = path.join(videoDir, `${base}.wav`);
   const mp3 = path.join(videoDir, `${base}.mp3`);
   await dubbing.merge(
-    fitted.map((f) => {
-      const p = parts.find((x) => x.i === f.index);
+    fitted.map((f, k) => {
+      // fitted và parts cùng thứ tự (cùng suy ra từ segments). Dùng vị trí,
+      // không dùng .find() theo id — trước đây find theo f.index trong khi
+      // syncfit trả về segIndex nên luôn ra undefined và sập ở .file.
+      const p = parts[k];
+      if (!p || !p.file) throw new Error(`Thiếu file voice cho đoạn ${k + 1}.`);
       return { file: p.file, start: f.start, speed: 1, duration: f.end - f.start };
     }),
     wav,
