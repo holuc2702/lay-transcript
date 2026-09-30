@@ -23,6 +23,31 @@ const main = async () => {
   const cdp = await CDP.connect(page.webSocketDebuggerUrl);
   console.log('-> ' + page.title);
 
+  console.log('0) tab "Long tieng" co THAT su hien ra khong...');
+  await cdp.eval(`document.querySelector('.tab[data-tab="dubbing"]').click()`);
+  await sleep(700);
+  const ui = JSON.parse(
+    await cdp.eval(`(() => {
+      const p = document.querySelector('.panel[data-panel="dubbing"]');
+      const box = document.querySelector('#dubMac');
+      const cards = p ? p.querySelectorAll('.card').length : 0;
+      const h = p ? p.getBoundingClientRect().height : 0;
+      return JSON.stringify({
+        panelActive: !!(p && p.classList.contains('active')),
+        boxHidden: !!(box && box.hidden),
+        cards,
+        height: Math.round(h),
+        ttsLoginBtn: !!document.querySelector('#btnTtsLogin'),
+      });
+    })()`)
+  );
+  console.log('   ' + JSON.stringify(ui));
+  if (!ui.panelActive) die('panel lồng tiếng không được bật');
+  if (ui.boxHidden) die('#dubMac đang bị ẩn — tab Lồng tiếng trống trơn');
+  if (ui.cards < 1) die('không có card nào hiện trong tab Lồng tiếng');
+  if (ui.height < 100) die(`tab Lồng tiếng quá thấp (${ui.height}px) — co thể đang trống`);
+  if (!ui.ttsLoginBtn) die('không thấy nút Đăng nhập 3A (Bước 1)');
+
   console.log('1) dang nhap 3A + dich Ollama...');
   console.log('   login:', await cdp.eval(`window.api.tts.login('3ATOOLOB@&#^21', false).then(r=>JSON.stringify(r)).catch(e=>'LOI '+e.message)`));
   console.log('   dich:', await cdp.eval(`window.api.providers.save({id:'ollama-cloud',keys:'eecdda1096f449e7877e1132b140f3fd.N2wndLBvGUHJtYG0cQa56cBr'}).then(()=>window.api.dubbing.translateAll([{text:'The library is closed today.'}],['ollama-cloud'])).then(r=>JSON.stringify(r).slice(0,160)).catch(e=>'LOI '+e.message)`));

@@ -1742,14 +1742,10 @@ async function loadModelSelect() {
 }
 
 async function initDubbing() {
-  // Quyết định macOS CHỈ dựa vào navigator — không gọi app.info().
-  // `app:info` phải xác minh chữ ký các binary (yt-dlp, sidecar) nên lần chạy
-  // đầu mất 10-30 giây. Nếu chờ nó thì tự đăng nhập bị hoãn tới khi đó và
-  // người dùng tưởng phải nhập mật khẩu.
-  const mac = /Mac|iPhone|iPad/i.test(navigator.userAgent) || navigator.platform === 'MacIntel';
-  if ($('#dubMac')) $('#dubMac').hidden = !mac;
-  if ($('#dubUnsupported')) $('#dubUnsupported').hidden = mac;
-  if (!mac) return;
+  // KHÔNG chặn theo nền tảng nữa: ffmpeg, sidecar Whisper và yt-dlp đều có
+  // bản Windows, và phần lớn IPC đã chạy được. Trước đây hàm này vẫn giữ
+  // điều kiện macOS (sau khi phần ở wireDubbing đã gỡ) nên trên Windows
+  // #dubMac bị ẩn -> tab Lồng tiếng trống trơn.
   await loadModelSelect();
 
   // Tự đăng nhập nếu trước đó đã chọn "Ghi nhớ mật khẩu".
