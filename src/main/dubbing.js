@@ -91,10 +91,12 @@ async function merge(parts, outFile, ffmpegPath, { workDir, onProgress, probeDur
     inputs.push('-i', p.file);
     // Chuẩn hoá về 44.1 kHz stereo để amix không bị lệch.
     filters.push(`[${i}:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo[n${i}]`);
-    // KHÔNG dùng atrim để cắt về đúng thời lượng đo được.
-    // atrim cắt CÚT phần đuôi khi ffprobe đo hơi ngắn hơn thật (mp3 VBR hay
-    // lệch vài ms) -> mất âm đầu câu. Giữ nguyên file, chỉ chuẩn hoá.
-    filters.push(`[n${i}]anull[t${i}]`);
+    // Áp hệ số tua mà bộ căn đã quyết định (atempo). Không có bước này thì
+    // file dài hơn khung đã căn -> đoạn sau tràn vào đuôi đoạn trước, nghe
+    // chồng tiếng và lệch dần về cuối video.
+    const sp = Number(p.speed);
+    const tempo = isFinite(sp) && sp > 1.001 ? Math.min(2, sp) : 1;
+    filters.push(tempo === 1 ? `[n${i}]anull[t${i}]` : `[n${i}]atempo=${tempo.toFixed(4)}[t${i}]`);
     const delay = Math.max(0, Math.round(p.start * 1000));
     filters.push(`[t${i}]adelay=${delay}|${delay}[d${i}]`);
   });

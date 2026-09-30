@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 /** Test lồng tiếng trực tiếp qua IPC: dịch + tạo voice + ghép, trên bất kỳ nền tảng nào. */
+import fs from 'node:fs';
 const PORT = process.env.E2E_PORT || '9222';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const die = (m) => { console.error('THAT BAI: ' + m); process.exit(1); };
@@ -30,9 +31,27 @@ const main = async () => {
   const r = await cdp.eval(`window.api.dubbing.run({
     segments:[{start:0,end:4,text:'Cau mot.'},{start:30,end:34,text:'Cau hai.'}],
     voice:'LÊ MINH', translate:false, outName:'WIN-DUB-TEST', voiceDirName:'Win test'
-  }).then(r=>JSON.stringify({wav:!!r.wav,mp3:!!r.mp3,srt:!!r.srt,dir:r.dir,sum:r.summary})).catch(e=>'LOI '+e.message)`);
+  }).then(r=>JSON.stringify({wav:r.wav,mp3:r.mp3,srt:r.srt,dir:r.dir,sum:r.summary})).catch(e=>'LOI '+e.message)`);
   console.log('   ' + r);
   if (String(r).startsWith('LOI')) die(r);
+
+  console.log('3) kiem tra SRT co chu that...');
+  const paths = JSON.parse(r);
+  const srtTxt = fs.readFileSync(paths.srt, 'utf8');
+  const bodies = srtTxt
+    .split('\n\n')
+    .map((b) => b.split('\n')[2] || '')
+    .filter(Boolean);
+  console.log('   srt: ' + JSON.stringify(bodies));
+  if (bodies.length < 2) die('SRT khong co du so cau');
+  if (bodies.some((b) => !b.trim())) die('SRT co cau rong chu');
+  if (!/Cau/.test(bodies[0])) die('SRT sai chu: ' + bodies[0]);
+
+  console.log('4) kiem tra merge khong canh chong...');
+  const st = fs.statSync(paths.wav);
+  console.log(`   wav: ${(st.size / 1024 / 1024).toFixed(2)} MB, mp3: ${fs.existsSync(paths.mp3)}`);
+  if (st.size < 1024) die('file wav rong');
+
   console.log('\n[ok] LONG TIENG TREN WINDOWS THANH CONG');
   process.exit(0);
 };

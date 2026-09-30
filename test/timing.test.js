@@ -319,3 +319,59 @@ test('không được bỏ mất câu nào', () => {
   );
   assert.equal(plan.length, 9);
 });
+
+// ---------------------------------------------------------------------------
+// Hồi quy: output của syncfit dùng `segIndex`, không có `index`/`drift`.
+// Đọc nhầm tên trường làm SRT ra chữ rỗng và maxDrift = NaN (hiện "nulls")
+// trên Windows — xem `normalizeFitted` trong src/main/index.js.
+// ---------------------------------------------------------------------------
+
+function normalizeFitted(fitted, planned, texts) {
+  return fitted.map((f, k) => {
+    const si = Number.isInteger(f.segIndex) ? f.segIndex : k;
+    const seg = planned[si] || planned[k] || null;
+    const origStart = seg ? Number(seg.start) || 0 : Number(f.start) || 0;
+    return {
+      ...f,
+      index: si,
+      text: f.text || texts[k] || '',
+      origStart,
+      origEnd: seg ? Number(seg.end) || origStart : origStart,
+      drift: (Number(f.start) || 0) - origStart,
+    };
+  });
+}
+
+test('SRT lấy đúng chữ của từng câu (không rỗng, không lệch thứ tự)', () => {
+  const texts = ['Câu một.', 'Câu hai.', 'Câu ba.'];
+  const plan = SF.alignToSegments(texts, segs13, null);
+  const norm = normalizeFitted(plan, segs13, texts);
+  assert.deepEqual(norm.map((f) => f.text), texts);
+  for (const f of norm) {
+    assert.ok(f.text.trim().length > 0, 'không được mất chữ trong SRT');
+  }
+});
+
+test('maxDrift/avgDrift là số thật, không phải NaN', () => {
+  const texts = Array.from({ length: 13 }, (_, i) => `Câu ${i}`);
+  const plan = SF.alignToSegments(texts, segs13, null);
+  const norm = normalizeFitted(plan, segs13, texts);
+  const s = T.summarize(norm);
+  assert.ok(Number.isFinite(s.maxDrift), `maxDrift phải là số, thực tế ${s.maxDrift}`);
+  assert.ok(Number.isFinite(s.avgDrift), `avgDrift phải là số, thực tế ${s.avgDrift}`);
+  assert.ok(s.maxDrift < 0.05, `căn 1-1 thì lệch phải gần 0, thực tế ${s.maxDrift}`);
+});
+
+test('bộ căn KHÔNG tạo ra câu nào thiếu chữ', () => {
+  // Ghép lại đúng như app làm: SRT = texts theo vị trí, không theo f.index.
+  const texts = Array.from({ length: 5 }, (_, i) => `Câu số ${i + 1}`);
+  const segs = Array.from({ length: 5 }, (_, i) => ({ start: i * 20, end: i * 20 + 18 }));
+  const norm = normalizeFitted(SF.alignToSegments(texts, segs, null), segs, texts);
+  const srtLines = norm.map((f, k) => `${k + 1}\n${f.text}`);
+  for (let k = 0; k < texts.length; k++) {
+    assert.ok(
+      srtLines[k].endsWith(texts[k]),
+      `dòng ${k + 1} phải là "${texts[k]}", thực tế "${srtLines[k]}"`
+    );
+  }
+});

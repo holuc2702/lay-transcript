@@ -906,7 +906,25 @@ handle('dubbing:run', async (payload) => {
     fitted = syncfit.refineWithRealDurations(fallbackPlan, durs, planned);
     report = syncfit.alignmentReport(fitted, planned);
   }
-  const sum = timing.summarize(fitted);
+  // Bộ căn syncfit trả về {segIndex, text, speed, start, end} — KHÔNG có
+  // `index`, `drift`, `origStart` mà timing.summarize và file SRT cần. Trước đây
+  // thiếu mấy trường đó nên SRT ra chữ rỗng và maxDrift = NaN (hiện "nulls").
+  // Chuẩn hoá về đúng hình dạng trước khi dùng.
+  const fittedNorm = fitted.map((f, k) => {
+    const si = Number.isInteger(f.segIndex) ? f.segIndex : k;
+    const seg = planned[si] || planned[k] || null;
+    const origStart = seg ? Number(seg.start) || 0 : Number(f.start) || 0;
+    return {
+      ...f,
+      index: si,
+      text: f.text || texts[parts[k] ? parts[k].idx : si] || '',
+      origStart,
+      origEnd: seg ? Number(seg.end) || origStart : origStart,
+      drift: (Number(f.start) || 0) - origStart,
+    };
+  });
+
+  const sum = timing.summarize(fittedNorm);
   log(
     `Đã tạo ${made}/${want} đoạn voice. ` +
       `Khớp timing: ${report.percent}% câu đúng khung gốc (lệch tối đa ${report.maxDrift}s), ` +
@@ -924,13 +942,15 @@ handle('dubbing:run', async (payload) => {
   const wav = path.join(videoDir, `${base}.wav`);
   const mp3 = path.join(videoDir, `${base}.mp3`);
   await dubbing.merge(
-    fitted.map((f, k) => {
-      // fitted và parts cùng thứ tự (cùng suy ra từ segments). Dùng vị trí,
+    fittedNorm.map((f, k) => {
+      // fittedNorm và parts cùng thứ tự (cùng suy ra từ segments). Dùng vị trí,
       // không dùng .find() theo id — trước đây find theo f.index trong khi
       // syncfit trả về segIndex nên luôn ra undefined và sập ở .file.
       const p = parts[k];
       if (!p || !p.file) throw new Error(`Thiếu file voice cho đoạn ${k + 1}.`);
-      return { file: p.file, start: f.start, speed: 1, duration: f.end - f.start };
+      // speed phải truyền xuống merge: hệ số tua chung mà syncfit đã tính,
+      // nếu để 1 thì audio dài hơn khung đã căn -> các đoạn tràn vào nhau.
+      return { file: p.file, start: f.start, speed: f.speed, duration: f.end - f.start };
     }),
     wav,
     ffmpegPath,
@@ -955,8 +975,8 @@ handle('dubbing:run', async (payload) => {
       String(s).padStart(2, '0') + ',' + String(ms % 1000).padStart(3, '0')
     );
   };
-  const srt = fitted
-    .map((f, k) => `${k + 1}\n${fmt(f.start)} --> ${fmt(f.end)}\n${texts[f.index] || ''}\n`)
+  const srt = fittedNorm
+    .map((f, k) => `${k + 1}\n${fmt(f.start)} --> ${fmt(f.end)}\n${f.text}\n`)
     .join('\n');
   fs.writeFileSync(srtFile, srt, 'utf8');
 
@@ -970,7 +990,7 @@ handle('dubbing:run', async (payload) => {
       voice: voice,
       translator: payload.translator || '',
       segmentCount: parts.length,
-      duration: timing.totalDuration(fitted),
+      duration: timing.totalDuration(fittedNorm),
       files: { wav, mp3: fs.existsSync(mp3) ? mp3 : null, srt: srtFile },
       voiceDir: keepDir,
       voiceCount: parts.filter((p) => p.saved).length,
